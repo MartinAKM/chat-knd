@@ -1,4 +1,5 @@
 from ollama import Client
+import os
 
 print('Iniciando client ollama...')
 client_ollama = Client(host=os.getenv('OLLAMA_SERVICE_URL'))
