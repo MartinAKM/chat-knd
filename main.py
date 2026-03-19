@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from ollama import Client
 from model.request import Request
 from services.request import chama_api
+from settings.llm import prompt_llm
+from openai import OpenAI
 import os
 
 load_dotenv()
@@ -20,10 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print('Iniciando client ollama...')
-client_ollama = Client(host=os.getenv('OLLAMA_SERVICE_URL'))
-print('Concluído')
-
 @app.get('/')
 def test():
     return { 'text': 'API up and running!' }
@@ -34,22 +31,23 @@ def gera_resposta(request:Request):
     contexto = chama_api('QDRANT', { 'query': request.query })
     print('Concluído')
 
-    resposta_ollama = None
+    resposta_lmstudio = None
 
+    print('Resposta LMStudio...')
     try:
-        print('Resposta ollama...')
-        resposta_ollama = client_ollama.chat(
-            model='chatknd',
+        client = OpenAI(base_url=os.getenv('LMSTUDIO_URL'), api_key="lm-studio")
+        resposta_lmstudio = client.chat.completions.create(
+            model=os.getenv('LMSTUDIO_MODEL'),
             messages=[
-                { 'role': 'system', 'content': f'\n{contexto}\n\nPergunta do usuário:\n{request.query}' },
+                { 'role': 'system', 'content': prompt_llm + f'\n{contexto}\n\nPergunta do usuário:\n{request.query}' },
                 { 'role': 'user', 'content': request.query }
-            ]
+            ],
+            extra_body={ 'include_reasoning': False },
+            temperature=0.3,
+            stream=False
         )
-        print('Concluído')
     except Exception as e:
-        print('Erro Ollama:', str(e))
-
-    if resposta_ollama:
-        return resposta_ollama
-    else:
-        return { 'text': 'nothing' }
+        print('Erro LMStudio:', str(e))
+    print('Concluído')
+    
+    return resposta_lmstudio
