@@ -1,10 +1,10 @@
 import requests
 import os
 
-def chama_api(qual:str, tipo:str, dados:dict):
+def chama_api(qual:str, dados:dict):
     url = os.getenv((qual.upper() + '_SERVICE_URL'))
 
-    resposta = requests.post(url, json=dados)
+    resposta = requests.post(url, json=dados, timeout=None)
 
     if resposta.status_code == 200:
         return resposta.json()
