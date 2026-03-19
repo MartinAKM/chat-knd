@@ -6,6 +6,8 @@ def chama_api(qual:str, dados:dict):
 
     resposta = requests.post(url, json=dados, timeout=None)
 
+    print(f'\n\nContexto:\n{resposta.json()}\n\n')
+
     if resposta.status_code == 200:
         return resposta.json()
     else:
