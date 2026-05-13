@@ -116,12 +116,16 @@ python viewer.py
 ```
 chat-knd/
 ├── doc_reader/
+│   ├── static/
+│   │   ├── viewer.html  # Viewer markup
+│   │   ├── viewer.css   # Viewer styles
+│   │   └── viewer.js    # Viewer client logic
 │   ├── reader.py        # Text extraction (PDF, DOCX, TXT, MD)
 │   ├── cleaner.py       # Text normalisation and ROTINA block removal
 │   ├── chunker.py       # Overlapping chunk splitter
 │   ├── chroma_store.py  # ChromaDB read/write helpers
 │   ├── ingest.py        # CLI ingestion entry point
-│   ├── viewer.py        # Browser-based ChromaDB viewer
+│   ├── viewer.py        # HTTP server — serves static/ and /api/* routes
 │   └── requirements.txt
 ├── CLAUDE.md            # Guidance for Claude Code
 ├── .env                 # Secrets (never committed)
