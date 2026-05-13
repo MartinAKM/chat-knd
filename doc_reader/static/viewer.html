@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChromaDB Viewer</title>
+  <link rel="stylesheet" href="/viewer.css" />
+</head>
+<body>
+
+<header>
+  <h1>ChromaDB Viewer</h1>
+  <span id="col-badge">collection: —</span>
+</header>
+
+<div class="stats-bar">
+  <div class="stat"><span class="stat-label">Total Chunks</span><span class="stat-value" id="s-chunks">—</span></div>
+  <div class="stat"><span class="stat-label">Source Files</span><span class="stat-value" id="s-sources">—</span></div>
+  <div class="stat"><span class="stat-label">Collections</span><span class="stat-value" id="s-cols">—</span></div>
+  <button class="reset-btn" onclick="resetCollection()" title="Drop the collection and recreate it empty (required after changing embedding model)">Reset Collection</button>
+</div>
+
+<div class="workspace">
+  <aside>
+    <div class="upload-section">
+      <span class="upload-title">Ingest file</span>
+      <div class="upload-row">
+        <label class="file-pick-label">
+          <input type="file" id="file-input" accept=".pdf,.docx,.txt,.md" multiple onchange="onFilePick(this)" />
+          <span class="file-pick-name" id="file-name">Choose file(s)…</span>
+        </label>
+        <button class="ingest-btn" id="ingest-btn" onclick="ingestFile()">Ingest</button>
+      </div>
+      <div class="ingest-status" id="ingest-status"></div>
+    </div>
+    <div class="aside-head">Sources</div>
+    <div class="source-list" id="source-list">
+      <div class="empty">Loading…</div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <input type="text" id="search-input" placeholder="Search or enter a phrase…" />
+      <button onclick="doSearch()">Text</button>
+      <button class="semantic" id="semantic-btn" onclick="doSemanticSearch()">Semantic</button>
+      <button class="secondary" onclick="clearSearch()">All</button>
+    </div>
+    <div class="mode-label" id="mode-label">Showing all chunks</div>
+    <div class="chunk-list" id="chunk-list">
+      <div class="empty">Select a source or search to explore chunks.</div>
+    </div>
+    <div class="pagination" id="pagination" style="display:none"></div>
+  </main>
+</div>
+
+<script src="/viewer.js"></script>
+</body>
+</html>
