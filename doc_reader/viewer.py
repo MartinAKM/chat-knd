@@ -185,7 +185,6 @@ def do_semantic_search(query: str, min_pct: float = 75.0, n_results: int = 20) -
         })
 
     results.sort(key=lambda x: x["proximity"], reverse=True)
-    print(results)
     return {"results": results, "query": query}
 
 
