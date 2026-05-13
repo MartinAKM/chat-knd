@@ -1,8 +1,4 @@
-import json
-import os
-import socketserver
-import sys
-import tempfile
+import json, os, socketserver, sys, tempfile, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
