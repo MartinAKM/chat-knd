@@ -6,7 +6,7 @@ RAG-based knowledge assistant for Kunden Systems ERP consultants. Consultants re
 
 1. ERP support documents (PDF, DOCX, TXT, MD) are ingested into a local ChromaDB vector store
 2. Each document is cleaned, stripped of irrelevant metadata (ROTINA/ACESSO blocks), and split into chunks
-3. Chunks are embedded with `nomic-embed-text` via Ollama and stored locally
+3. Chunks are embedded with `sentence-transformers/all-MiniLM-L6-v2` (runs locally, no external service required) and stored in ChromaDB
 4. The viewer lets you browse, search, and semantically query the stored knowledge
 
 ## Stack
@@ -14,7 +14,7 @@ RAG-based knowledge assistant for Kunden Systems ERP consultants. Consultants re
 | Layer | Technology |
 |---|---|
 | Vector store | ChromaDB (local persistent) |
-| Embeddings | `nomic-embed-text` via Ollama |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (local, no GPU required) |
 | LLM (planned) | `llama3` via Ollama |
 | Database | Oracle 12c via `oracledb` thin mode |
 | API (planned) | Python + FastAPI |
@@ -22,12 +22,9 @@ RAG-based knowledge assistant for Kunden Systems ERP consultants. Consultants re
 ## Requirements
 
 - Python 3.10+
-- [Ollama](https://ollama.com) running locally with `nomic-embed-text` pulled
 - Oracle 12c access (for ticket ingestion, optional)
 
-```bash
-ollama pull nomic-embed-text
-```
+No external embedding service needed — `sentence-transformers` runs fully locally and downloads the model (~90 MB) from HuggingFace on first use.
 
 ## Setup
 
@@ -53,8 +50,8 @@ copy .env.example .env       # Windows
 | `ORACLE_CALLS_QUERY` | SELECT query to fetch support tickets |
 | `CHROMA_PATH` | ChromaDB persistence directory (default: `chroma_data`) |
 | `CHROMA_COLLECTION` | Collection name (default: `documents`) |
-| `OLLAMA_BASE_URL` | Ollama endpoint (default: `http://localhost:11434`) |
-| `EMBED_MODEL` | Embedding model (default: `nomic-embed-text`) |
+| `OLLAMA_BASE_URL` | Ollama endpoint for LLM generation (default: `http://localhost:11434`) |
+| `EMBED_MODEL` | Embedding model (default: `all-MiniLM-L6-v2`) |
 | `VIEWER_PORT` | Viewer port (default: `8001`) |
 
 ## Ingesting documents
@@ -100,17 +97,19 @@ python viewer.py
 
 **Text search** — keyword match inside chunk content (fast, no Ollama needed).
 
-**Semantic search** — enter a phrase and find chunks by meaning using vector similarity. Results show a proximity percentage; only chunks above **50%** are displayed.
+**Semantic search** — enter a phrase and find chunks by meaning using vector similarity. Results show a proximity percentage; only chunks above **75%** are displayed.
 
 | Badge colour | Proximity |
 |---|---|
-| Green | ≥ 80% |
-| Blue | 65 – 79% |
-| Amber | 50 – 64% |
+| Green | ≥ 85% |
+| Blue | 80 – 84% |
+| Amber | 75 – 79% |
 
 **Upload & Ingest** — drag or pick one or more files directly in the sidebar. The full ingestion pipeline runs server-side and the source list refreshes automatically.
 
 **Delete** — hover any source in the sidebar and click **✕** to remove all its chunks from the store.
+
+**Reset Collection** — button in the stats bar. Drops and recreates the ChromaDB collection with the current embedding model. Required after changing `EMBED_MODEL`; all documents must be re-ingested afterwards.
 
 ## Project structure
 

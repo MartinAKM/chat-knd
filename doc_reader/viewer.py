@@ -24,8 +24,7 @@ load_dotenv()
 
 CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 PORT = int(os.getenv("VIEWER_PORT", "8001"))
 
 HTML = r"""<!DOCTYPE html>
@@ -137,6 +136,17 @@ HTML = r"""<!DOCTYPE html>
       padding: 2px 7px; border-radius: 99px; margin-left: 8px;
     }
 
+    .chunk-info {
+      margin-top: 10px; padding-top: 8px; border-top: 1px solid #f1f5f9;
+      display: flex; flex-wrap: wrap; gap: 5px;
+    }
+    .meta-tag {
+      font-size: .68rem; background: #f8fafc; border: 1px solid #e2e8f0;
+      border-radius: 4px; padding: 2px 8px; color: #475569;
+      font-family: monospace;
+    }
+    .meta-tag b { color: #1e3a5f; font-weight: 600; }
+
     .empty { text-align: center; color: #94a3b8; padding: 60px 20px; font-size: .9rem; }
 
     .pagination {
@@ -181,6 +191,13 @@ HTML = r"""<!DOCTYPE html>
     }
     .ingest-status.ok  { color: #16a34a; }
     .ingest-status.err { color: #dc2626; }
+
+    .reset-btn {
+      margin-left: auto; padding: 5px 14px; background: none;
+      border: 1px solid #fca5a5; border-radius: 6px; color: #ef4444;
+      font-size: .78rem; cursor: pointer; transition: background .15s, color .15s;
+    }
+    .reset-btn:hover { background: #fee2e2; }
   </style>
 </head>
 <body>
@@ -194,6 +211,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="stat"><span class="stat-label">Total Chunks</span><span class="stat-value" id="s-chunks">—</span></div>
   <div class="stat"><span class="stat-label">Source Files</span><span class="stat-value" id="s-sources">—</span></div>
   <div class="stat"><span class="stat-label">Collections</span><span class="stat-value" id="s-cols">—</span></div>
+  <button class="reset-btn" onclick="resetCollection()" title="Drop the collection and recreate it empty (required after changing embedding model)">Reset Collection</button>
 </div>
 
 <div class="workspace">
@@ -344,7 +362,7 @@ HTML = r"""<!DOCTYPE html>
       const results = data.results || [];
       renderChunks(results);
       document.getElementById('mode-label').textContent =
-        `Semantic: "${state.query}" — ${results.length} chunk(s) above 50% proximity`;
+        `Semantic: "${state.query}" — ${results.length} chunk(s) above 75% proximity`;
     } else if (state.mode === 'search') {
       data = await api(`/api/search?q=${encodeURIComponent(state.query)}`);
       renderChunks(data.results || [], state.query);
@@ -374,9 +392,17 @@ HTML = r"""<!DOCTYPE html>
   }
 
   function proxClass(pct) {
-    if (pct >= 80) return 'prox-high';
-    if (pct >= 65) return 'prox-mid';
+    if (pct >= 85) return 'prox-high';
+    if (pct >= 80) return 'prox-mid';
     return 'prox-low';
+  }
+
+  function renderMeta(meta) {
+    if (!meta || !Object.keys(meta).length) return '';
+    const tags = Object.entries(meta)
+      .map(([k, v]) => `<span class="meta-tag"><b>${escHtml(k)}:</b> ${escHtml(String(v))}</span>`)
+      .join('');
+    return `<div class="chunk-info">${tags}</div>`;
   }
 
   function renderChunks(items, query = '') {
@@ -397,6 +423,7 @@ HTML = r"""<!DOCTYPE html>
           </div>
         </div>
         <div class="chunk-text">${highlight(item.text, query)}</div>
+        ${renderMeta(item.metadata)}
       </div>`).join('');
   }
 
@@ -476,6 +503,22 @@ HTML = r"""<!DOCTYPE html>
     }
 
     btn.disabled = false;
+  }
+
+  async function resetCollection() {
+    if (!confirm('Drop and recreate the collection?\nAll indexed chunks will be deleted — you will need to re-ingest all documents.')) return;
+    try {
+      const r = await fetch('/api/reset-collection', { method: 'POST' });
+      const data = await r.json();
+      if (data.ok) {
+        clearSearch();
+        await loadStats();
+      } else {
+        alert('Reset failed: ' + (data.error || 'unknown'));
+      }
+    } catch (err) {
+      alert('Reset failed: ' + err.message);
+    }
   }
 
   loadStats();
@@ -565,11 +608,36 @@ def do_search(query):
     return {"results": results}
 
 
-def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -> dict:
+_PT_STOPWORDS = {
+    "nao", "nha", "para", "com", "por", "mas", "uma", "umas", "uns",
+    "que", "isso", "esse", "este", "esta", "aqui", "ser", "tem", "ter",
+    "foi", "sao", "como", "mais", "nos", "nas", "dos", "das", "num",
+    "numa", "seu", "sua", "seus", "suas", "ele", "ela", "eles", "elas",
+    "tambem", "nao", "pelo", "pela", "pelos", "pelas",
+}
+
+
+def _keyword_score(chunk_text: str, query: str) -> float:
+    """
+    Fraction of significant query words present in the chunk.
+    Uses a 5-char stem prefix to handle basic Portuguese morphology
+    (e.g. 'lançamentos' and 'lançamento' both match stem 'lança').
+    Returns 1.0 when the query has no significant words so no penalty is applied.
+    """
+    tokens = re.findall(r"\w+", query.lower())
+    significant = [t for t in tokens if len(t) > 3 and t not in _PT_STOPWORDS]
+    if not significant:
+        return 1.0
+    text_lower = chunk_text.lower()
+    matched = sum(1 for w in significant if w[:5] in text_lower)
+    return matched / len(significant)
+
+
+def do_semantic_search(query: str, min_pct: float = 75.0, n_results: int = 20) -> dict:
     if not query.strip():
         return {"results": [], "query": query}
     try:
-        col = get_collection(CHROMA_PATH, OLLAMA_URL, EMBED_MODEL, COLLECTION_NAME)
+        col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
     except Exception as e:
         return {"results": [], "error": str(e)}
 
@@ -590,10 +658,15 @@ def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -
     for doc_id, doc, meta, dist in zip(
         res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0]
     ):
-        # L2 dist → cosine similarity (valid because nomic-embed-text returns unit vectors)
-        # cos_sim = 1 - L2² / 2  (derived from ||a-b||² = 2 - 2·cos_sim for unit vectors)
-        cos_sim = max(0.0, 1.0 - (dist ** 2) / 2.0)
-        pct = round(cos_sim * 100, 1)
+        # L2 distance → proximity %.
+        # nomic-embed-text produces unit-norm vectors, so L2 ∈ [0, 2]:
+        #   dist=0  → identical  → 100 %
+        #   dist=2  → opposite   →   0 %
+        # Using a linear mapping (1 - dist/2) keeps the full range meaningful
+        # and distributes scores far more evenly than cosine similarity does
+        # (cos_sim clusters all domain-specific docs above 80%, making the
+        # threshold useless; linear L2 proximity spreads them across 60-90%).
+        pct = round(max(0.0, (1.0 - dist / 2.0) * 100), 1)
         if pct < min_pct:
             continue
         results.append({
@@ -605,6 +678,7 @@ def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -
         })
 
     results.sort(key=lambda x: x["proximity"], reverse=True)
+    print(results)
     return {"results": results, "query": query}
 
 
@@ -666,6 +740,16 @@ def _parse_upload(rfile, content_type: str, content_length: int):
     raise ValueError("No file part found in upload")
 
 
+def handle_reset_collection():
+    client = get_client()
+    try:
+        client.delete_collection(COLLECTION_NAME)
+    except Exception:
+        pass
+    get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+    return {"ok": True}
+
+
 def do_ingest(rfile, content_type: str, content_length: int):
     filename, file_bytes = _parse_upload(rfile, content_type, content_length)
     suffix = Path(filename).suffix.lower()
@@ -682,7 +766,7 @@ def do_ingest(rfile, content_type: str, content_length: int):
         chunks = [c for c in chunk_text(text) if is_good_chunk(c)]
         if not chunks:
             return {"ok": False, "error": "No usable content found after cleaning."}
-        col = get_collection(CHROMA_PATH, OLLAMA_URL, EMBED_MODEL, COLLECTION_NAME)
+        col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
         upsert_chunks(col, filename, chunks)
         return {"ok": True, "filename": filename, "chunks": len(chunks)}
     finally:
@@ -754,14 +838,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/ingest":
-            self.send_response(404)
-            self.end_headers()
-            return
         try:
-            content_type = self.headers.get("Content-Type", "")
-            content_length = int(self.headers.get("Content-Length", 0))
-            self.send_json(do_ingest(self.rfile, content_type, content_length))
+            if parsed.path == "/api/reset-collection":
+                self.send_json(handle_reset_collection())
+            elif parsed.path == "/api/ingest":
+                content_type = self.headers.get("Content-Type", "")
+                content_length = int(self.headers.get("Content-Length", 0))
+                self.send_json(do_ingest(self.rfile, content_type, content_length))
+            else:
+                self.send_response(404)
+                self.end_headers()
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)})
 

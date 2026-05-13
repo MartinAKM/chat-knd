@@ -1,13 +1,10 @@
 import chromadb
-from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 
-def get_collection(chroma_path: str, ollama_url: str, embed_model: str, collection_name: str):
+def get_collection(chroma_path: str, embed_model: str, collection_name: str):
     client = chromadb.PersistentClient(path=chroma_path)
-    ef = OllamaEmbeddingFunction(
-        url=f"{ollama_url}/api/embeddings",
-        model_name=embed_model,
-    )
+    ef = SentenceTransformerEmbeddingFunction(model_name=embed_model)
     return client.get_or_create_collection(name=collection_name, embedding_function=ef)
 
 

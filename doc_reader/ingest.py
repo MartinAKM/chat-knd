@@ -12,8 +12,7 @@ from reader import SUPPORTED_EXTENSIONS, extract_text
 load_dotenv()
 
 CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
 
 
@@ -40,7 +39,7 @@ def main() -> None:
             print("Error: --delete requires a filename argument.")
             sys.exit(1)
         doc_id = args[1]
-        collection = get_collection(CHROMA_PATH, OLLAMA_URL, EMBED_MODEL, COLLECTION)
+        collection = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION)
         removed = delete_chunks(collection, doc_id)
         if removed:
             print(f"Deleted {removed} chunk(s) for '{doc_id}'.")
@@ -53,7 +52,7 @@ def main() -> None:
         print(f"Path not found: {target}")
         sys.exit(1)
 
-    collection = get_collection(CHROMA_PATH, OLLAMA_URL, EMBED_MODEL, COLLECTION)
+    collection = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION)
 
     files = (
         [target]
