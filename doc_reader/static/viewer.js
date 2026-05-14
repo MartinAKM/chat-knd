@@ -36,7 +36,19 @@ function renderSources(sources, counts) {
 
 async function deleteSource(e, src) {
   e.stopPropagation();
-  if (!confirm(`Delete all chunks for "${src}"?\nThis cannot be undone.`)) return;
+
+  const result = await Swal.fire({
+    title: `Delete all chunks for '${src}'?`,
+    text: 'This cannot be undone.',
+    icon: 'warning',
+    showCancelButton: true,
+    // confirmButtonColor: "#3085d6",
+    // cancelButtonColor: "#d33",
+    confirmButtonText: 'Delete'
+  });
+
+  if (!result.isConfirmed) return;
+
   try {
     const r = await fetch('/api/delete', {
       method: 'DELETE',
@@ -45,13 +57,14 @@ async function deleteSource(e, src) {
     });
     const data = await r.json();
     if (data.ok) {
+      Swal.fire('Deleted!', 'Source deleted successfully.', 'success');
       if (state.source === src) clearSearch();
       await loadStats();
     } else {
-      alert('Error: ' + (data.error || 'unknown'));
+      Swal.fire('Error', data.error || 'unknown', 'error');
     }
   } catch (err) {
-    alert('Error: ' + err.message);
+    Swal.fire('Error', err.message, 'error');
   }
 }
 
@@ -255,18 +268,30 @@ async function ingestFile() {
 }
 
 async function resetCollection() {
-  if (!confirm('Drop and recreate the collection?\nAll indexed chunks will be deleted — you will need to re-ingest all documents.')) return;
+  const result = await Swal.fire({
+    title: 'Drop and recreate the collection?',
+    text: 'All indexed chunks will be deleted — you will need to re-ingest all documents.',
+    icon: 'warning',
+    showCancelButton: true,
+    // confirmButtonColor: "#3085d6",
+    // cancelButtonColor: "#d33",
+    confirmButtonText: 'Reset collection'
+  });
+
+  if (!result.isConfirmed) return;
+
   try {
     const r = await fetch('/api/reset-collection', { method: 'POST' });
     const data = await r.json();
     if (data.ok) {
+      Swal.fire('Success!', 'Collection reset successfully', 'success');
       clearSearch();
       await loadStats();
     } else {
-      alert('Reset failed: ' + (data.error || 'unknown'));
+      Swal.fire('Reset failed', data.error || 'unknown', 'error');
     }
   } catch (err) {
-    alert('Reset failed: ' + err.message);
+    Swal.fire('Reset failed', err.message, 'error');
   }
 }
 
