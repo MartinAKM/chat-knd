@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Chat-KND is a RAG-based AI assistant for Kunden Systems ERP consultants. Consultants receive Oracle Forms ERP support tickets and need fast answers from historical solutions and documentation.
+ChatKND is a RAG-based AI assistant for Kunden Systems ERP consultants. Consultants receive Oracle Forms ERP support tickets and need fast answers from historical solutions and documentation.
 
 ## Stack
 

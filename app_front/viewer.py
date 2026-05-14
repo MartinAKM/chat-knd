@@ -6,11 +6,15 @@ from urllib.parse import urlparse, parse_qs
 from dotenv import load_dotenv
 import chromadb
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_ROOT / "doc_reader"))
+sys.path.insert(0, str(_ROOT))
+
 from chunker import chunk_text
 from chroma_store import get_collection, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_text
+from chat_api.chat import generate as chat_generate
 
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
@@ -22,7 +26,7 @@ CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 PORT = int(os.getenv("VIEWER_PORT", "8001"))
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).parent
 
 _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -309,6 +313,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path in ("/viewer.css", "/viewer.js"):
                 self.serve_static(path.lstrip("/"))
 
+            elif path == "/chat":
+                self.serve_static("chat.html")
+
+            elif path in ("/chat.css", "/chat.js"):
+                self.serve_static(path.lstrip("/"))
+
             elif path == "/api/stats":
                 self.send_json(get_stats())
 
@@ -355,6 +365,15 @@ class Handler(BaseHTTPRequestHandler):
                 content_type = self.headers.get("Content-Type", "")
                 content_length = int(self.headers.get("Content-Length", 0))
                 self.send_json(do_ingest(self.rfile, content_type, content_length))
+            elif parsed.path == "/api/chat":
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length))
+                question = body.get("question", "").strip()
+                history  = body.get("history", [])
+                if not question:
+                    self.send_json({"error": "Missing 'question' field"})
+                else:
+                    self.send_json(chat_generate(question, history))
             else:
                 self.send_response(404)
                 self.end_headers()

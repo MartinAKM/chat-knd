@@ -1,4 +1,4 @@
-# Chat-KND
+# ChatKND
 
 RAG-based knowledge assistant for Kunden Systems ERP consultants. Consultants receive Oracle Forms ERP support tickets and need fast answers from historical solutions and documentation.
 
@@ -114,7 +114,7 @@ python viewer.py
 ## Project structure
 
 ```
-chat-knd/
+ChatKND/
 ├── doc_reader/
 │   ├── static/
 │   │   ├── viewer.html  # Viewer markup
