@@ -42,8 +42,8 @@ async function deleteSource(e, src) {
     text: 'This cannot be undone.',
     icon: 'warning',
     showCancelButton: true,
-    // confirmButtonColor: "#3085d6",
-    // cancelButtonColor: "#d33",
+    confirmButtonColor: "#3085d6",
+    cancelButtonColor: "#d33",
     confirmButtonText: 'Delete'
   });
 
@@ -273,8 +273,8 @@ async function resetCollection() {
     text: 'All indexed chunks will be deleted — you will need to re-ingest all documents.',
     icon: 'warning',
     showCancelButton: true,
-    // confirmButtonColor: "#3085d6",
-    // cancelButtonColor: "#d33",
+    confirmButtonColor: "#3085d6",
+    cancelButtonColor: "#d33",
     confirmButtonText: 'Reset collection'
   });
 
