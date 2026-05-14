@@ -44,7 +44,23 @@ function filterSources() {
 
 async function deleteSource(e, src) {
   e.stopPropagation();
-  if (!confirm(`Delete all chunks for "${src}"?\nThis cannot be undone.`)) return;
+  const result = await Swal.fire({
+    text: 'Tem certeza que deseja deletar esse Chunk?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#1e3a5f',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Deletar',
+    cancelButtonText: 'Cancelar',
+    customClass: {
+      popup: 'custom-swal',
+      confirmButton: 'custom-confirm-btn',
+      cancelButton: 'custom-cancel-btn'
+    }
+  });
+
+  if (!result.isConfirmed) return;
+
   try {
     const r = await fetch('/api/delete', {
       method: 'DELETE',
@@ -53,13 +69,14 @@ async function deleteSource(e, src) {
     });
     const data = await r.json();
     if (data.ok) {
+      Swal.fire('Deleted!', 'Source deleted successfully.', 'success');
       if (state.source === src) clearSearch();
       await loadStats();
     } else {
-      alert('Error: ' + (data.error || 'unknown'));
+      Swal.fire('Error', data.error || 'unknown', 'error');
     }
   } catch (err) {
-    alert('Error: ' + err.message);
+    Swal.fire('Error', err.message, 'error');
   }
 }
 
@@ -263,35 +280,68 @@ async function ingestFile() {
 }
 
 async function clearAllChunks() {
-  if (!confirm('Delete ALL chunks from the collection?\nThe collection itself is kept — you can re-ingest files afterwards.')) return;
+  const result = await Swal.fire({
+    text: 'Deletar TODOS Chunks da Collection?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#1e3a5f',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Deletar Todos',
+    cancelButtonText: 'Cancelar',
+    customClass: {
+      popup: 'custom-swal',
+      confirmButton: 'custom-confirm-btn',
+      cancelButton: 'custom-cancel-btn'
+    }
+  });
+
+  if (!result.isConfirmed) return;
+
   try {
     const r = await fetch('/api/clear-all', { method: 'POST' });
     const data = await r.json();
     if (data.ok) {
       clearSearch();
       await loadStats();
-      alert(`Done — ${data.deleted.toLocaleString()} chunk(s) removed.`);
+      Swal.fire('Success!', `Done — ${data.deleted.toLocaleString()} chunk(s) removed.`, 'success');
     } else {
-      alert('Failed: ' + (data.error || 'unknown'));
+      Swal.fire('Reset failed', data.error || 'unknown', 'error');
     }
   } catch (err) {
-    alert('Failed: ' + err.message);
+    Swal.fire('Reset failed', err.message, 'error');
   }
 }
 
 async function resetCollection() {
-  if (!confirm('Drop and recreate the collection?\nAll indexed chunks will be deleted — you will need to re-ingest all documents.')) return;
+  const result = await Swal.fire({
+    text: 'Tem certeza que deseja recriar a Collection?',
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#1e3a5f',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Resetar Collection',
+    cancelButtonText: 'Cancelar',
+    customClass: {
+      popup: 'custom-swal',
+      confirmButton: 'custom-confirm-btn',
+      cancelButton: 'custom-cancel-btn'
+    }
+  });
+
+  if (!result.isConfirmed) return;
+
   try {
     const r = await fetch('/api/reset-collection', { method: 'POST' });
     const data = await r.json();
     if (data.ok) {
+      Swal.fire('Success!', 'Collection reset successfully', 'success');
       clearSearch();
       await loadStats();
     } else {
-      alert('Reset failed: ' + (data.error || 'unknown'));
+      Swal.fire('Reset failed', data.error || 'unknown', 'error');
     }
   } catch (err) {
-    alert('Reset failed: ' + err.message);
+    Swal.fire('Reset failed', err.message, 'error');
   }
 }
 
