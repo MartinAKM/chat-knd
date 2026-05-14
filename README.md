@@ -29,8 +29,8 @@ RAG-based AI assistant for Kunden Systems ERP consultants. Consultants receive O
 ## Setup
 
 ```bash
-# 1. Create and activate a virtual environment
-python -m venv venv
+# 1. Create and activate a virtual environment using python 3.13 version
+python -3.13 -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux / Mac
 
