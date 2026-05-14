@@ -254,6 +254,23 @@ async function ingestFile() {
   btn.disabled = false;
 }
 
+async function clearAllChunks() {
+  if (!confirm('Delete ALL chunks from the collection?\nThe collection itself is kept — you can re-ingest files afterwards.')) return;
+  try {
+    const r = await fetch('/api/clear-all', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      clearSearch();
+      await loadStats();
+      alert(`Done — ${data.deleted.toLocaleString()} chunk(s) removed.`);
+    } else {
+      alert('Failed: ' + (data.error || 'unknown'));
+    }
+  } catch (err) {
+    alert('Failed: ' + err.message);
+  }
+}
+
 async function resetCollection() {
   if (!confirm('Drop and recreate the collection?\nAll indexed chunks will be deleted — you will need to re-ingest all documents.')) return;
   try {

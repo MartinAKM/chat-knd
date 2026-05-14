@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -21,14 +22,53 @@ CHROMA_PATH     = os.getenv("CHROMA_PATH", "chroma_data")
 EMBED_MODEL     = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 
-_CONTEXT_RESULTS  = 5
-_MIN_PROXIMITY    = 60.0   # discard chunks below 60 % similarity
+_CONTEXT_RESULTS     = 5   # max chunks from semantic search
+_KEYWORD_RESULTS     = 5   # max extra chunks from keyword search
+_MIN_PROXIMITY       = 60.0
+
+# Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
+_ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
 
 _SYSTEM_PROMPT = (
-    "You are ChatKND, an expert in Oracle Forms ERP. "
-    "When context excerpts are provided, ground your answer in them. "
-    "Answer clearly and concisely. If you are unsure, say so."
+    "Você é o ChatKND, um assistente especialista em ERP Oracle Forms. "
+    "Sempre responda em português brasileiro, independentemente do idioma da pergunta. "
+    "Quando forem fornecidos trechos de contexto, baseie sua resposta neles. "
+    "Responda de forma clara e objetiva. Se não tiver certeza, diga isso."
 )
+
+
+# ── Keyword config ─────────────────────────────────────────────────────────
+
+def _load_keywords() -> list[str]:
+    path = _ROOT / "keywords.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        terms = data.get("programs", []) + data.get("terms", [])
+        return [t.strip() for t in terms if t.strip()]
+    except Exception:
+        return []
+
+_CONFIGURED_KEYWORDS: list[str] = _load_keywords()
+
+
+def _extract_keywords(question: str) -> list[str]:
+    """
+    Return terms from the query that warrant exact-match keyword search.
+    Combines auto-detected ERP codes with configured keywords.
+    """
+    found: list[str] = []
+
+    # Auto-detect ERP codes (e.g. CFAB24, EPRO15)
+    for match in _ERP_CODE_RE.finditer(question):
+        found.append(match.group())
+
+    # Configured terms (case-insensitive match against the query)
+    for term in _CONFIGURED_KEYWORDS:
+        if re.search(r"\b" + re.escape(term) + r"\b", question, re.IGNORECASE):
+            if term not in found:
+                found.append(term)
+
+    return found
 
 
 # ── Ollama lifecycle ───────────────────────────────────────────────────────
@@ -63,9 +103,13 @@ def _ensure_running() -> None:
 
 def _retrieve_context(question: str) -> tuple[str, list[str]]:
     """
-    Semantic search against ChromaDB.
+    Hybrid retrieval: semantic search + exact keyword match.
+
+    Semantic search finds thematically related chunks.
+    Keyword search guarantees that chunks containing ERP program codes or
+    configured domain terms are always included, regardless of similarity score.
+
     Returns (context_block, unique_source_names).
-    Both are empty when the collection is empty or no chunk meets the threshold.
     """
     try:
         col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
@@ -73,28 +117,53 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         if count == 0:
             return "", []
 
+        # Results keyed by chunk id to deduplicate across both searches.
+        # Value: (document_text, metadata, proximity_pct)
+        seen: dict[str, tuple[str, dict, float]] = {}
+
+        # 1. Semantic search
         res = col.query(
             query_texts=[question],
             n_results=min(_CONTEXT_RESULTS, count),
             include=["documents", "metadatas", "distances"],
         )
-
-        chunks, sources = [], []
-        for doc, meta, dist in zip(
-            res["documents"][0], res["metadatas"][0], res["distances"][0]
+        for doc_id, doc, meta, dist in zip(
+            res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0]
         ):
             proximity = max(0.0, (1.0 - dist / 2.0) * 100)
-            if proximity < _MIN_PROXIMITY:
+            if proximity >= _MIN_PROXIMITY:
+                seen[doc_id] = (doc, meta, proximity)
+
+        # 2. Keyword exact-match search for detected ERP codes / configured terms
+        keywords = _extract_keywords(question)
+        for term in keywords:
+            try:
+                kw = col.get(
+                    where_document={"$contains": term},
+                    include=["documents", "metadatas"],
+                    limit=_KEYWORD_RESULTS,
+                )
+            except Exception:
                 continue
-            chunks.append(doc)
+            for doc_id, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
+                if doc_id not in seen:
+                    # Treat exact keyword match as high confidence
+                    seen[doc_id] = (doc, meta, 100.0)
+
+        if not seen:
+            return "", []
+
+        # Sort by proximity descending; keyword hits (100.0) surface first
+        ranked = sorted(seen.values(), key=lambda x: x[2], reverse=True)
+        top    = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS]
+
+        context = "\n---\n".join(entry[0] for entry in top)
+        sources: list[str] = []
+        for _, meta, _ in top:
             src = meta.get("source", "unknown")
             if src not in sources:
                 sources.append(src)
 
-        if not chunks:
-            return "", []
-
-        context = "\n---\n".join(chunks)
         return context, sources
 
     except Exception:
@@ -119,17 +188,14 @@ def generate(question: str, history: list[dict]) -> dict:
 
     if context:
         current_content = (
-            "Use the following excerpts from the knowledge base to answer the question. "
-            "If they are not relevant, answer from your own knowledge.\n\n"
-            f"Context:\n{context}\n\n"
-            f"Question: {question}"
+            "Use os trechos abaixo da base de conhecimento para responder à pergunta. "
+            "Se não forem relevantes, responda com seu próprio conhecimento.\n\n"
+            f"Contexto:\n{context}\n\n"
+            f"Pergunta: {question}"
         )
     else:
         current_content = question
 
-    # Re-build message list: system + prior turns + augmented current question.
-    # history[-1] is the raw user question already appended by the frontend;
-    # we replace it with the context-augmented version.
     prior_turns = history[:-1] if history else []
 
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]

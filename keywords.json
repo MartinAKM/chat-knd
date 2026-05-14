@@ -1,0 +1,15 @@
+{
+  "_comment": "Add ERP program codes and domain-specific terms here. Codes that match the pattern [A-Z]{2,6}[0-9]{2,6} (e.g. CFAB24, EPRO15) are detected automatically from the query — only add entries that would NOT be caught by that pattern.",
+  "programs": [
+    "CFAB24"
+  ],
+  "terms": [
+    "NF-e",
+    "NFS",
+    "nfs",
+    "NFE",
+    "nfe",
+    "CT-e",
+    "NFS-e"
+  ]
+}

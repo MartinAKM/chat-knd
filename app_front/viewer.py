@@ -140,7 +140,7 @@ def _keyword_score(chunk_text: str, query: str) -> float:
     return matched / len(significant)
 
 
-def do_semantic_search(query: str, min_pct: float = 75.0, n_results: int = 20) -> dict:
+def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -> dict:
     if not query.strip():
         return {"results": [], "query": query}
     try:
@@ -256,6 +256,29 @@ def handle_reset_collection():
     return {"ok": True}
 
 
+def handle_clear_all_chunks():
+    """Delete every chunk from the active collection without dropping it."""
+    client = get_client()
+    try:
+        col = client.get_collection(COLLECTION_NAME)
+    except Exception:
+        return {"ok": True, "deleted": 0}
+    total = col.count()
+    if total == 0:
+        return {"ok": True, "deleted": 0}
+    deleted = 0
+    offset = 0
+    while offset < total:
+        batch = col.get(limit=500, offset=offset, include=[])
+        ids = batch["ids"]
+        if not ids:
+            break
+        col.delete(ids=ids)
+        deleted += len(ids)
+        offset += len(ids)
+    return {"ok": True, "deleted": deleted}
+
+
 def do_ingest(rfile, content_type: str, content_length: int):
     filename, file_bytes = _parse_upload(rfile, content_type, content_length)
     suffix = Path(filename).suffix.lower()
@@ -361,6 +384,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/reset-collection":
                 self.send_json(handle_reset_collection())
+            elif parsed.path == "/api/clear-all":
+                self.send_json(handle_clear_all_chunks())
             elif parsed.path == "/api/ingest":
                 content_type = self.headers.get("Content-Type", "")
                 content_length = int(self.headers.get("Content-Length", 0))
