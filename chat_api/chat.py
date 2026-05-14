@@ -24,6 +24,7 @@ COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 
 _CONTEXT_RESULTS     = 5   # max chunks from semantic search
 _KEYWORD_RESULTS     = 5   # max extra chunks from keyword search
+_DATE_RESULTS        = 10  # max chunks from date-filtered search
 _MIN_PROXIMITY       = 60.0
 
 # Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
@@ -31,6 +32,69 @@ _ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
 
 # Matches ticket numbers: YYMMDD + 3-digit sequence (e.g. 250922016)
 _TICKET_RE = re.compile(r"\b2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}\b")
+
+# ── Date extraction ────────────────────────────────────────────────────────
+
+_MONTH_MAP = {
+    "janeiro": "01", "fevereiro": "02",
+    "março": "03",   "marco": "03",
+    "abril": "04",   "maio": "05",    "junho": "06",
+    "julho": "07",   "agosto": "08",  "setembro": "09",
+    "outubro": "10", "novembro": "11", "dezembro": "12",
+}
+_YEAR_RE        = re.compile(r"\b20(\d{2})\b")
+_MONTH_NAME_RE  = re.compile(
+    r"\b(" + "|".join(re.escape(m) for m in _MONTH_MAP) + r")\b", re.IGNORECASE
+)
+_DAY_RE         = re.compile(r"\bdia\s+(0?[1-9]|[12]\d|3[01])\b", re.IGNORECASE)
+# DD/MM/YYYY  e.g. 15/03/2026
+_SLASH_FULL_RE  = re.compile(r"\b(0?[1-9]|[12]\d|3[01])/(0[1-9]|1[0-2])/(20\d{2})\b")
+# MM/YYYY     e.g. 03/2026
+_SLASH_MONTH_RE = re.compile(r"\b(0[1-9]|1[0-2])/(20\d{2})\b")
+
+
+def _extract_date_prefix(question: str) -> str | None:
+    """
+    Detect a date reference and return the ticket ID prefix for that period.
+
+    "2026"                      → "26"
+    "03/2026"                   → "2603"
+    "15/03/2026"                → "260315"
+    "março de 2026"             → "2603"
+    "dia 15 de março de 2026"   → "260315"
+    Returns None when no date is found.
+    """
+    # DD/MM/YYYY — most specific, try first
+    m = _SLASH_FULL_RE.search(question)
+    if m:
+        dd, mm, yyyy = m.group(1).zfill(2), m.group(2), m.group(3)[2:]
+        return yyyy + mm + dd
+
+    # MM/YYYY
+    m = _SLASH_MONTH_RE.search(question)
+    if m:
+        mm, yyyy = m.group(1), m.group(2)[2:]
+        return yyyy + mm
+
+    # Year (required for all word-based formats below)
+    year_m = _YEAR_RE.search(question)
+    if not year_m:
+        return None
+    yy = year_m.group(1)
+
+    # Month name
+    month_m = _MONTH_NAME_RE.search(question)
+    if not month_m:
+        return yy
+
+    mm = _MONTH_MAP[month_m.group(1).lower()]
+
+    # "dia N"
+    day_m = _DAY_RE.search(question)
+    if day_m:
+        return yy + mm + day_m.group(1).zfill(2)
+
+    return yy + mm
 
 _SYSTEM_PROMPT = (
     "Você é o ChatKND, um assistente especialista em ERP Oracle Forms. "
@@ -211,15 +275,29 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
                 continue
             for doc_id, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
                 if doc_id not in seen:
-                    # Treat exact keyword match as high confidence
                     seen[doc_id] = (doc, meta, 100.0)
+
+        # 3. Date-filtered search — fetches ticket chunks from the detected period
+        date_prefix = _extract_date_prefix(question)
+        if date_prefix:
+            try:
+                kw = col.get(
+                    where_document={"$contains": "Atendimento: " + date_prefix},
+                    include=["documents", "metadatas"],
+                    limit=_DATE_RESULTS,
+                )
+                for doc_id, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
+                    if doc_id not in seen:
+                        seen[doc_id] = (doc, meta, 100.0)
+            except Exception:
+                pass
 
         if not seen:
             return "", []
 
-        # Sort by proximity descending; keyword hits (100.0) surface first
+        # Sort by proximity descending; keyword/date hits (100.0) surface first
         ranked = sorted(seen.values(), key=lambda x: x[2], reverse=True)
-        top    = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS]
+        top    = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
 
         context = "\n---\n".join(entry[0] for entry in top)
         sources: list[str] = []
