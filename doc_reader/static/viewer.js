@@ -38,13 +38,18 @@ async function deleteSource(e, src) {
   e.stopPropagation();
 
   const result = await Swal.fire({
-    title: `Delete all chunks for '${src}'?`,
-    text: 'This cannot be undone.',
+    title: 'Delete All Chunks?',
+    text: 'This action will permanently remove all indexed chunks.',
     icon: 'warning',
     showCancelButton: true,
-    // confirmButtonColor: "#3085d6",
-    // cancelButtonColor: "#d33",
-    confirmButtonText: 'Delete'
+    confirmButtonColor: '#1e3a5f',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Delete',
+    customClass: {
+      popup: 'custom-swal',
+      confirmButton: 'custom-confirm-btn',
+      cancelButton: 'custom-cancel-btn'
+    }
   });
 
   if (!result.isConfirmed) return;
@@ -269,13 +274,18 @@ async function ingestFile() {
 
 async function resetCollection() {
   const result = await Swal.fire({
-    title: 'Drop and recreate the collection?',
+    title: 'Drop and Recreate Collection?',
     text: 'All indexed chunks will be deleted — you will need to re-ingest all documents.',
     icon: 'warning',
     showCancelButton: true,
-    // confirmButtonColor: "#3085d6",
-    // cancelButtonColor: "#d33",
-    confirmButtonText: 'Reset collection'
+    confirmButtonColor: '#1e3a5f',
+    cancelButtonColor: '#6b7280',
+    confirmButtonText: 'Reset collection',
+    customClass: {
+      popup: 'custom-swal',
+      confirmButton: 'custom-confirm-btn',
+      cancelButton: 'custom-cancel-btn'
+    }
   });
 
   if (!result.isConfirmed) return;
