@@ -407,7 +407,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"ChromaDB Viewer  ->  http://localhost:{PORT}")
+    print(f"ChatKND  ->  http://localhost:{PORT}")
     print(f"  Collection : {COLLECTION_NAME}")
     print(f"  Data path  : {CHROMA_PATH}")
     print("Press Ctrl+C to stop.\n")

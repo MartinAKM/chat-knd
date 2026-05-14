@@ -57,6 +57,24 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
   padding: 0 16px;
 }
 
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+.thread,
+.composer textarea {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.thread::-webkit-scrollbar,
+.composer textarea::-webkit-scrollbar { width: 6px; }
+.thread::-webkit-scrollbar-track,
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.thread::-webkit-scrollbar-thumb,
+.composer textarea::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 99px;
+}
+.thread::-webkit-scrollbar-thumb:hover,
+.composer textarea::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
 /* ── Thread ─────────────────────────────────────────────────────────────── */
 .thread {
   flex: 1;
