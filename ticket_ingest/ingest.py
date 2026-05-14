@@ -57,12 +57,20 @@ if ORACLE_CLIENT_PATH:
 
 _QUERY = """
     SELECT
-        ATENDIMENTO_ID,
-        DATA_HORA,
-        USUARIO_ID,
-        TEXTO
-    FROM MSG_ATENDIMENTO_CRM
-    ORDER BY ATENDIMENTO_ID, DATA_HORA
+        M.ATENDIMENTO_ID,
+        M.DATA_HORA,
+        M.USUARIO_ID,
+        M.TEXTO,
+        P.NOME CLIENTE
+    FROM PESSOA_CRM P,
+         CLIENTE_CRM C,
+         ATENDIMENTO_CRM A,
+         MSG_ATENDIMENTO_CRM M
+    WHERE A.ID = M.ATENDIMENTO_ID
+      AND C.ID = A.CLIENTE_ID
+      AND P.ID = C.PESSOA_ID
+      AND A.ID IN (250922016, 250922024, 260413014)
+    ORDER BY M.ATENDIMENTO_ID, M.DATA_HORA
 """
 
 # ── HTML stripping ─────────────────────────────────────────────────────────
@@ -121,7 +129,7 @@ def _build_conversation(messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _first_last_fallback(atendimento_id, messages: list[dict]) -> str:
+def _first_last_fallback(atendimento_id, cliente: str, messages: list[dict]) -> str:
     """Minimal fallback when LLM summarisation fails."""
     texts = []
     for msg in messages:
@@ -132,7 +140,7 @@ def _first_last_fallback(atendimento_id, messages: list[dict]) -> str:
         return ""
     problem    = texts[0]
     resolution = texts[-1] if len(texts) > 1 else ""
-    lines = [f"Atendimento: {atendimento_id}"]
+    lines = [f"Cliente: {cliente}", f"Atendimento: {atendimento_id}"]
     lines.append(f"Problema: {problem[:400]}")
     if resolution:
         lines.append(f"Resolução: {resolution[:400]}")
@@ -172,6 +180,7 @@ _SUMMARY_PROMPT = """\
 Você é um assistente que resume tickets de suporte de ERP Oracle Forms.
 Analise a conversa abaixo e responda EXATAMENTE neste formato, sem nenhum texto adicional:
 
+Cliente: {cliente}
 Programa: [programa(s) ERP mencionado(s), ex: CFAB24, EPRO15 — ou "Não especificado"]
 Problema: [descrição objetiva do problema em 1 a 3 frases]
 Solução: [descrição objetiva da solução aplicada em 1 a 3 frases — ou "Não resolvido" se o ticket não tiver solução]
@@ -181,7 +190,7 @@ CONVERSA:
 {conversation}
 """
 
-def _summarize(atendimento_id, conversation: str) -> str | None:
+def _summarize(atendimento_id, cliente: str, conversation: str) -> str | None:
     """
     Call Ollama to summarise a ticket conversation.
     Returns the structured summary string, or None if the call fails.
@@ -189,6 +198,7 @@ def _summarize(atendimento_id, conversation: str) -> str | None:
     truncated = conversation[:MAX_CONV_CHARS]
     prompt = _SUMMARY_PROMPT.format(
         atendimento_id=atendimento_id,
+        cliente=cliente,
         conversation=truncated,
     )
     payload = json.dumps({
@@ -279,12 +289,14 @@ def ingest_tickets(
         if not conversation.strip():
             return False
 
+        cliente = msgs[0].get("cliente", "") if msgs else ""
+
         if use_llm:
-            summary = _summarize(atendimento_id, conversation)
+            summary = _summarize(atendimento_id, cliente, conversation)
             if not summary:
-                summary = _first_last_fallback(atendimento_id, msgs)
+                summary = _first_last_fallback(atendimento_id, cliente, msgs)
         else:
-            summary = _first_last_fallback(atendimento_id, msgs)
+            summary = _first_last_fallback(atendimento_id, cliente, msgs)
 
         if not summary.strip():
             return False
@@ -296,7 +308,7 @@ def ingest_tickets(
     print(f"Streaming tickets from Oracle  (LLM summarisation: {'on' if use_llm else 'off'})…\n")
 
     for row in cursor:
-        atendimento_id, data_hora, usuario_id, texto = row
+        atendimento_id, data_hora, usuario_id, texto, cliente = row
 
         if current_id is None:
             current_id = atendimento_id
@@ -320,6 +332,7 @@ def ingest_tickets(
             "data_hora":  str(data_hora),
             "usuario_id": str(usuario_id or ""),
             "texto":      texto,
+            "cliente":    str(cliente or ""),
         })
 
     if current_id is not None and messages:

@@ -29,6 +29,9 @@ _MIN_PROXIMITY       = 60.0
 # Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
 _ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
 
+# Matches ticket numbers: YYMMDD + 3-digit sequence (e.g. 250922016)
+_TICKET_RE = re.compile(r"\b2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}\b")
+
 _SYSTEM_PROMPT = (
     "Você é o ChatKND, um assistente especialista em ERP Oracle Forms. "
     "Sempre responda em português brasileiro, independentemente do idioma da pergunta. "
@@ -38,6 +41,15 @@ _SYSTEM_PROMPT = (
 
 
 # ── Keyword config ─────────────────────────────────────────────────────────
+
+# Common Brazilian/English company suffixes ignored when matching client names
+_COMPANY_SUFFIXES = {
+    "ltda", "sa", "s/a", "me", "epp", "eireli", "ss", "inc", "corp", "cia",
+    "da", "de", "do", "das", "dos", "e",
+}
+
+# Regex to extract the client name line from a ticket chunk
+_CLIENT_LINE_RE = re.compile(r"^Cliente:\s*(.+)$", re.MULTILINE)
 
 def _load_keywords() -> list[str]:
     path = _ROOT / "keywords.json"
@@ -50,11 +62,52 @@ def _load_keywords() -> list[str]:
 
 _CONFIGURED_KEYWORDS: list[str] = _load_keywords()
 
+# Cache of client names extracted from ChromaDB ticket chunks.
+# Populated on first query; lives for the duration of the server process.
+_clients_cache: list[str] | None = None
+
+
+def _get_known_clients() -> list[str]:
+    """Return all unique client names found in ingested ticket chunks."""
+    global _clients_cache
+    if _clients_cache is not None:
+        return _clients_cache
+    try:
+        col   = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+        total = col.count()
+        clients: set[str] = set()
+        offset = 0
+        while offset < total:
+            data = col.get(include=["documents", "metadatas"], limit=500, offset=offset)
+            for doc, meta in zip(data["documents"], data["metadatas"]):
+                if meta.get("source", "").startswith("ticket_"):
+                    m = _CLIENT_LINE_RE.search(doc)
+                    if m:
+                        clients.add(m.group(1).strip())
+            offset += 500
+        _clients_cache = list(clients)
+    except Exception:
+        _clients_cache = []
+    return _clients_cache
+
+
+def _client_in_question(client_name: str, question: str) -> bool:
+    """Return True if any significant word of client_name appears in question."""
+    words = [
+        w for w in client_name.split()
+        if w.lower() not in _COMPANY_SUFFIXES and len(w) > 3
+    ]
+    return bool(words) and any(
+        re.search(r"\b" + re.escape(w) + r"\b", question, re.IGNORECASE)
+        for w in words
+    )
+
 
 def _extract_keywords(question: str) -> list[str]:
     """
     Return terms from the query that warrant exact-match keyword search.
-    Combines auto-detected ERP codes with configured keywords.
+    Combines auto-detected ERP codes, ticket numbers, configured keywords,
+    and client names extracted from ingested ticket chunks.
     """
     found: list[str] = []
 
@@ -62,11 +115,22 @@ def _extract_keywords(question: str) -> list[str]:
     for match in _ERP_CODE_RE.finditer(question):
         found.append(match.group())
 
-    # Configured terms (case-insensitive match against the query)
+    # Auto-detect ticket numbers (e.g. 250922016 → YYMMDD + 3-digit sequence)
+    for match in _TICKET_RE.finditer(question):
+        ticket = match.group()
+        if ticket not in found:
+            found.append(ticket)
+
+    # Configured terms (case-insensitive word-boundary match)
     for term in _CONFIGURED_KEYWORDS:
         if re.search(r"\b" + re.escape(term) + r"\b", question, re.IGNORECASE):
             if term not in found:
                 found.append(term)
+
+    # Client names from ingested ticket chunks — matched by significant words
+    for client in _get_known_clients():
+        if _client_in_question(client, question) and client not in found:
+            found.append(client)
 
     return found
 

@@ -32,6 +32,14 @@ function renderSources(sources, counts) {
         onclick="deleteSource(event,'${safe}')">&#x2715;</button>
     </div>`;
   }).join('');
+  filterSources();
+}
+
+function filterSources() {
+  const q = (document.getElementById('source-filter-input').value || '').toLowerCase();
+  document.querySelectorAll('.source-item').forEach(el => {
+    el.style.display = el.dataset.src.toLowerCase().includes(q) ? '' : 'none';
+  });
 }
 
 async function deleteSource(e, src) {
