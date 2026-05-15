@@ -61,7 +61,8 @@ _QUERY = """
         M.DATA_HORA,
         M.USUARIO_ID,
         M.TEXTO,
-        P.NOME CLIENTE
+        P.NOME CLIENTE,
+        A.PEDIDO PEDIDO_SERVICO
     FROM PESSOA_CRM P,
          CLIENTE_CRM C,
          ATENDIMENTO_CRM A,
@@ -129,7 +130,7 @@ def _build_conversation(messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _first_last_fallback(atendimento_id, cliente: str, messages: list[dict]) -> str:
+def _first_last_fallback(atendimento_id, cliente: str, pedido_servico: str, messages: list[dict]) -> str:
     """Minimal fallback when LLM summarisation fails."""
     texts = []
     for msg in messages:
@@ -140,7 +141,11 @@ def _first_last_fallback(atendimento_id, cliente: str, messages: list[dict]) -> 
         return ""
     problem    = texts[0]
     resolution = texts[-1] if len(texts) > 1 else ""
-    lines = [f"Cliente: {cliente}", f"Atendimento: {atendimento_id}"]
+    lines = [
+        f"Cliente: {cliente}",
+        f"Pedido de Serviço: {pedido_servico or 'Não informado'}",
+        f"Atendimento: {atendimento_id}",
+    ]
     lines.append(f"Problema: {problem[:400]}")
     if resolution:
         lines.append(f"Resolução: {resolution[:400]}")
@@ -181,6 +186,7 @@ Você é um assistente que resume tickets de suporte de ERP Oracle Forms.
 Analise a conversa abaixo e responda EXATAMENTE neste formato, sem nenhum texto adicional:
 
 Cliente: {cliente}
+Pedido de Serviço: {pedido_servico}
 Programa: [programa(s) ERP mencionado(s), ex: CFAB24, EPRO15 — ou "Não especificado"]
 Problema: [descrição objetiva do problema em 1 a 3 frases]
 Solução: [descrição objetiva da solução aplicada em 1 a 3 frases — ou "Não resolvido" se o ticket não tiver solução]
@@ -190,7 +196,7 @@ CONVERSA:
 {conversation}
 """
 
-def _summarize(atendimento_id, cliente: str, conversation: str) -> str | None:
+def _summarize(atendimento_id, cliente: str, pedido_servico: str, conversation: str) -> str | None:
     """
     Call Ollama to summarise a ticket conversation.
     Returns the structured summary string, or None if the call fails.
@@ -199,6 +205,7 @@ def _summarize(atendimento_id, cliente: str, conversation: str) -> str | None:
     prompt = _SUMMARY_PROMPT.format(
         atendimento_id=atendimento_id,
         cliente=cliente,
+        pedido_servico=pedido_servico or "Não informado",
         conversation=truncated,
     )
     payload = json.dumps({
@@ -289,14 +296,15 @@ def ingest_tickets(
         if not conversation.strip():
             return False
 
-        cliente = msgs[0].get("cliente", "") if msgs else ""
+        cliente        = msgs[0].get("cliente", "") if msgs else ""
+        pedido_servico = msgs[0].get("pedido_servico", "") if msgs else ""
 
         if use_llm:
-            summary = _summarize(atendimento_id, cliente, conversation)
+            summary = _summarize(atendimento_id, cliente, pedido_servico, conversation)
             if not summary:
-                summary = _first_last_fallback(atendimento_id, cliente, msgs)
+                summary = _first_last_fallback(atendimento_id, cliente, pedido_servico, msgs)
         else:
-            summary = _first_last_fallback(atendimento_id, cliente, msgs)
+            summary = _first_last_fallback(atendimento_id, cliente, pedido_servico, msgs)
 
         if not summary.strip():
             return False
@@ -308,7 +316,7 @@ def ingest_tickets(
     print(f"Streaming tickets from Oracle  (LLM summarisation: {'on' if use_llm else 'off'})…\n")
 
     for row in cursor:
-        atendimento_id, data_hora, usuario_id, texto, cliente = row
+        atendimento_id, data_hora, usuario_id, texto, cliente, pedido_servico = row
 
         if current_id is None:
             current_id = atendimento_id
@@ -329,10 +337,11 @@ def ingest_tickets(
             messages   = []
 
         messages.append({
-            "data_hora":  str(data_hora),
-            "usuario_id": str(usuario_id or ""),
-            "texto":      texto,
-            "cliente":    str(cliente or ""),
+            "data_hora":     str(data_hora),
+            "usuario_id":    str(usuario_id or ""),
+            "texto":         texto,
+            "cliente":       str(cliente or ""),
+            "pedido_servico": str(pedido_servico or ""),
         })
 
     if current_id is not None and messages:
