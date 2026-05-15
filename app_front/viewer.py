@@ -15,7 +15,7 @@ from chroma_store import get_collection, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_text
 from reranker import rerank
-from chat_api.chat import generate as chat_generate
+from chat_api.chat import stream_generate as chat_stream
 from chat_api.history import (
     delete_conversation, get_conversation, list_conversations,
 )
@@ -579,10 +579,22 @@ class Handler(BaseHTTPRequestHandler):
                 question        = body.get("question", "").strip()
                 history         = body.get("history", [])
                 conversation_id = body.get("conversation_id") or None
-                if not question:
-                    self.send_json({"error": "Missing 'question' field"})
-                else:
-                    self.send_json(chat_generate(question, history, conversation_id, user["id"]))
+                images          = body.get("images") or None
+                if not question and not images:
+                    self.send_json({"error": "Missing 'question' or 'images' field"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                try:
+                    for chunk in chat_stream(question, history, conversation_id, user["id"], images):
+                        line = ("data: " + json.dumps(chunk, ensure_ascii=False) + "\n\n").encode("utf-8")
+                        self.wfile.write(line)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
             else:
                 self.send_response(404)

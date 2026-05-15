@@ -387,22 +387,71 @@ def _build_rag_query(question: str, history: list[dict]) -> str:
     return " ".join(parts)[:400]
 
 
+# ── Vision pre-pass ───────────────────────────────────────────────────────
+
+_IMAGE_EXTRACT_PROMPT = (
+    "Analise esta imagem e responda SOMENTE com:\n"
+    "- Códigos de erro visíveis no formato KND-NNNNN ou ORA-NNNNNN\n"
+    "- Códigos de programa ERP visíveis (letras maiúsculas seguidas de dígitos, ex: EPRO15, PEDI1)\n"
+    "- Uma frase de até 15 palavras descrevendo o problema mostrado\n\n"
+    "Sem explicações adicionais."
+)
+
+
+def _extract_image_terms(images: list[str]) -> str:
+    """
+    Quick vision pass to pull error codes, program codes, and a brief
+    problem description out of the attached images.
+    The result is appended to the RAG query so retrieval can find relevant
+    tickets even when the user sends an image with no (or minimal) text.
+    Returns an empty string on any failure.
+    """
+    payload = json.dumps({
+        "model": CHAT_MODEL,
+        "messages": [{"role": "user", "content": _IMAGE_EXTRACT_PROMPT, "images": images}],
+        "stream": False,
+    }).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read())["message"]["content"].strip()
+    except Exception:
+        return ""
+
+
 # ── Generation ─────────────────────────────────────────────────────────────
 
-def generate(question: str, history: list[dict], conversation_id: str | None = None, user_id: str | None = None) -> dict:
+def generate(question: str, history: list[dict], conversation_id: str | None = None, user_id: str | None = None, images: list[str] | None = None) -> dict:
     """
     Retrieve relevant context from ChromaDB, inject it into the current user
     message, then call Ollama with the full conversation history.
 
     `history` already contains the current question as its last entry
     (the frontend appends it before sending the request).
+    `images` is an optional list of base64-encoded image strings to pass to
+    vision-capable models alongside the current message.
 
     Returns {"answer": str, "sources": [str, ...], "conversation_id": str}.
     """
     _ensure_running()
 
-    rag_query = _build_rag_query(question, history)
-    context, sources = _retrieve_context(rag_query)
+    # When images are attached, do a quick vision pre-pass to extract error
+    # codes, program codes, and a brief description so the RAG retrieval can
+    # find relevant tickets even when the user sent minimal text.
+    if images:
+        image_terms = _extract_image_terms(images)
+        rag_query = _build_rag_query(f"{question} {image_terms}".strip(), history)
+        context, sources = _retrieve_context(rag_query)
+    elif question:
+        rag_query = _build_rag_query(question, history)
+        context, sources = _retrieve_context(rag_query)
+    else:
+        context, sources = "", []
 
     if context:
         current_content = (
@@ -412,15 +461,19 @@ def generate(question: str, history: list[dict], conversation_id: str | None = N
             f"Pergunta: {question}"
         )
     else:
-        current_content = question
+        current_content = question or "Descreva o que você vê nessa imagem."
 
     prior_turns = history[:-1] if history else []
     if len(prior_turns) > _MAX_HISTORY_TURNS:
         prior_turns = prior_turns[-_MAX_HISTORY_TURNS:]
 
+    current_msg: dict = {"role": "user", "content": current_content}
+    if images:
+        current_msg["images"] = images
+
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
     messages += prior_turns
-    messages.append({"role": "user", "content": current_content})
+    messages.append(current_msg)
 
     payload = json.dumps({
         "model": CHAT_MODEL,
@@ -449,3 +502,94 @@ def generate(question: str, history: list[dict], conversation_id: str | None = N
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         raise RuntimeError(f"Ollama returned {e.code}: {body}")
+
+
+def stream_generate(
+    question: str,
+    history: list[dict],
+    conversation_id: str | None = None,
+    user_id: str | None = None,
+    images: list[str] | None = None,
+):
+    """
+    Streaming version of generate(). Yields dicts:
+      {"token": str}                                           — one per chunk
+      {"done": True, "sources": list, "conversation_id": str} — final metadata
+      {"error": str}                                           — on failure
+    """
+    _ensure_running()
+
+    if images:
+        image_terms = _extract_image_terms(images)
+        rag_query = _build_rag_query(f"{question} {image_terms}".strip(), history)
+        context, sources = _retrieve_context(rag_query)
+    elif question:
+        rag_query = _build_rag_query(question, history)
+        context, sources = _retrieve_context(rag_query)
+    else:
+        context, sources = "", []
+
+    if context:
+        current_content = (
+            "Use os trechos abaixo da base de conhecimento para responder à pergunta. "
+            "Se não forem relevantes, responda com seu próprio conhecimento.\n\n"
+            f"Contexto:\n{context}\n\n"
+            f"Pergunta: {question}"
+        )
+    else:
+        current_content = question or "Descreva o que você vê nessa imagem."
+
+    prior_turns = history[:-1] if history else []
+    if len(prior_turns) > _MAX_HISTORY_TURNS:
+        prior_turns = prior_turns[-_MAX_HISTORY_TURNS:]
+
+    current_msg: dict = {"role": "user", "content": current_content}
+    if images:
+        current_msg["images"] = images
+
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    messages += prior_turns
+    messages.append(current_msg)
+
+    payload = json.dumps({
+        "model": CHAT_MODEL,
+        "messages": messages,
+        "stream": True,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    full_answer: list[str] = []
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            for raw_line in r:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                data = json.loads(line)
+                token = data.get("message", {}).get("content", "")
+                if token:
+                    full_answer.append(token)
+                    yield {"token": token}
+                if data.get("done"):
+                    break
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        yield {"error": f"Ollama returned {e.code}: {body}"}
+        return
+    except Exception as e:
+        yield {"error": str(e)}
+        return
+
+    answer = "".join(full_answer)
+    if user_id:
+        if not conversation_id:
+            conversation_id = create_conversation(question or answer[:60], user_id)
+        append_exchange(conversation_id, user_id, question, answer, sources)
+
+    yield {"done": True, "sources": sources, "conversation_id": conversation_id}

@@ -6,6 +6,7 @@ const welcome = document.getElementById("welcome");
 marked.use({ breaks: true, gfm: true });
 
 let busy = false;
+let attachedImages = []; // { dataUrl, base64 }
 
 // ── Input helpers ──────────────────────────────────────────────────────────
 
@@ -34,13 +35,77 @@ function newConversation() {
   welcome.style.display = "";
   input.value = "";
   autoResize(input);
+  attachedImages = [];
+  renderImagePreviews();
   document.querySelectorAll(".history-item").forEach(el => el.classList.remove("active"));
   input.focus();
 }
 
+// ── Image attachment ───────────────────────────────────────────────────────
+
+input.addEventListener("paste", e => {
+  const items = Array.from(e.clipboardData?.items || []);
+  const imageItems = items.filter(it => it.type.startsWith("image/"));
+  if (!imageItems.length) return;
+  e.preventDefault();
+  imageItems.forEach(item => {
+    const file = item.getAsFile();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      attachedImages.push({ dataUrl, base64: dataUrl.split(",")[1] });
+      renderImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+});
+
+function handleImageAttach() {
+  const imgInput = document.getElementById("img-input");
+  for (const file of imgInput.files) {
+    if (!file.type.startsWith("image/")) continue;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      const base64  = dataUrl.split(",")[1];
+      attachedImages.push({ dataUrl, base64 });
+      renderImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  }
+  imgInput.value = "";
+}
+
+function renderImagePreviews() {
+  const preview = document.getElementById("img-preview");
+  preview.innerHTML = "";
+  if (!attachedImages.length) {
+    preview.style.display = "none";
+    return;
+  }
+  preview.style.display = "flex";
+  attachedImages.forEach((img, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "preview-thumb";
+
+    const im = document.createElement("img");
+    im.src = img.dataUrl;
+
+    const btn = document.createElement("button");
+    btn.className = "preview-remove";
+    btn.textContent = "×";
+    btn.onclick = () => { attachedImages.splice(i, 1); renderImagePreviews(); };
+
+    wrap.appendChild(im);
+    wrap.appendChild(btn);
+    preview.appendChild(wrap);
+  });
+}
+
 // ── Rendering helpers ──────────────────────────────────────────────────────
 
-function appendMessage(role, text, sources) {
+function appendMessage(role, text, sources, images) {
   welcome.style.display = "none";
 
   const row = document.createElement("div");
@@ -61,7 +126,20 @@ function appendMessage(role, text, sources) {
       throwOnError: false,
     });
   } else {
-    bubble.textContent = text;
+    if (images && images.length) {
+      const imgWrap = document.createElement("div");
+      imgWrap.className = "msg-images";
+      images.forEach(dataUrl => {
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.className = "msg-image";
+        imgWrap.appendChild(img);
+      });
+      bubble.appendChild(imgWrap);
+    }
+    const textSpan = document.createElement("span");
+    textSpan.textContent = text;
+    bubble.appendChild(textSpan);
   }
 
   if (sources && sources.length) {
@@ -130,8 +208,9 @@ function appendError(text) {
 
 async function sendMessage() {
   if (busy) return;
-  const text = input.value.trim();
-  if (!text) return;
+  const text   = input.value.trim();
+  const images = [...attachedImages];
+  if (!text && !images.length) return;
 
   busy = true;
   sendBtn.disabled = true;
@@ -139,37 +218,145 @@ async function sendMessage() {
 
   input.value = "";
   autoResize(input);
+  attachedImages = [];
+  renderImagePreviews();
 
-  appendMessage("user", text);
+  const dataUrls = images.map(i => i.dataUrl);
+  const base64s  = images.map(i => i.base64);
+
+  appendMessage("user", text, [], dataUrls);
   history.push({ role: "user", content: text });
 
   const typingRow = appendTyping();
+
+  let assistantRow    = null;
+  let assistantBubble = null;
+  let fullAnswer      = "";
+  let rafId           = null;
+
+  function scheduleRender() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      if (!assistantBubble) return;
+      assistantBubble.innerHTML = marked.parse(fullAnswer);
+      thread.scrollTop = thread.scrollHeight;
+    });
+  }
+
+  function createStreamingBubble() {
+    typingRow.remove();
+    assistantRow = document.createElement("div");
+    assistantRow.className = "msg-row assistant";
+    assistantBubble = document.createElement("div");
+    assistantBubble.className = "msg-bubble streaming";
+    const meta = document.createElement("div");
+    meta.className = "msg-meta";
+    meta.textContent = "ChatKND";
+    assistantRow.appendChild(assistantBubble);
+    assistantRow.appendChild(meta);
+    thread.appendChild(assistantRow);
+  }
+
+  function finalizeStreamingBubble(sources) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (!assistantBubble) return;
+    assistantBubble.innerHTML = marked.parse(fullAnswer);
+    assistantBubble.classList.remove("streaming");
+    renderMathInElement(assistantBubble, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true  },
+        { left: "$",  right: "$",  display: false },
+        { left: "\\[", right: "\\]", display: true  },
+        { left: "\\(", right: "\\)", display: false },
+      ],
+      throwOnError: false,
+    });
+    if (sources && sources.length) {
+      const bar = document.createElement("div");
+      bar.className = "msg-sources";
+      sources.forEach(s => {
+        const tag = document.createElement("span");
+        tag.className = "source-tag";
+        if (s.includes("ticket_")) {
+          const link = document.createElement("a");
+          link.href = `https://kundencloud.com.br:3825/atendimento?id=${s.replace("ticket_", "")}&callType=customer`;
+          link.target = "_blank";
+          link.className = "source-tag-link";
+          link.textContent = s;
+          tag.appendChild(link);
+        } else {
+          tag.textContent = s;
+        }
+        bar.appendChild(tag);
+      });
+      assistantBubble.appendChild(bar);
+    }
+  }
 
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: text, history, conversation_id: currentConversationId }),
+      body: JSON.stringify({
+        question: text,
+        history,
+        conversation_id: currentConversationId,
+        images: base64s.length ? base64s : undefined,
+      }),
     });
 
-    typingRow.remove();
-
     if (!res.ok) {
+      typingRow.remove();
       const err = await res.json().catch(() => ({}));
       appendError(err.error || `Server error (${res.status})`);
       history.pop();
     } else {
-      const data = await res.json();
-      const answer = data.answer ?? "(empty response)";
-      const sources = data.sources ?? [];
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let hadError = false;
 
-      if (data.conversation_id) {
-        currentConversationId = data.conversation_id;
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          let chunk;
+          try { chunk = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (chunk.error) {
+            typingRow.remove();
+            appendError(chunk.error);
+            history.pop();
+            hadError = true;
+            break outer;
+          }
+
+          if (chunk.token) {
+            if (!assistantRow) createStreamingBubble();
+            fullAnswer += chunk.token;
+            scheduleRender();
+          }
+
+          if (chunk.done) {
+            finalizeStreamingBubble(chunk.sources);
+            if (chunk.conversation_id) currentConversationId = chunk.conversation_id;
+            history.push({ role: "assistant", content: fullAnswer });
+            loadHistory();
+          }
+        }
       }
 
-      appendMessage("assistant", answer, sources);
-      history.push({ role: "assistant", content: answer });
-      loadHistory();
+      if (!hadError && !assistantRow) {
+        typingRow.remove();
+        appendError("No response received.");
+        history.pop();
+      }
     }
   } catch (e) {
     typingRow.remove();

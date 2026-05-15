@@ -343,6 +343,18 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
   text-decoration: none;
 }
 
+/* Streaming cursor */
+.msg-bubble.streaming::after {
+  content: "▋";
+  display: inline;
+  color: #94a3b8;
+  animation: cursor-blink .9s step-end infinite;
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 /* Typing indicator */
 .typing-bubble {
   background: #fff;
@@ -411,6 +423,80 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
   align-content: center;
 }
 .composer textarea::placeholder { color: #94a3b8; }
+
+#attach-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  margin-bottom: 2px;
+  transition: color .15s, background .15s;
+  font-family: inherit;
+}
+#attach-btn:hover { color: #1e3a5f; background: #f1f5f9; }
+
+/* Image preview strip above the composer */
+.img-preview {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 10px;
+}
+.preview-thumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.preview-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.preview-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  background: rgba(0,0,0,.55);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  font-size: .75rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: inherit;
+}
+.preview-remove:hover { background: rgba(0,0,0,.75); }
+
+/* Images inside message bubbles */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.msg-image {
+  max-width: 260px;
+  max-height: 200px;
+  border-radius: 8px;
+  object-fit: contain;
+  display: block;
+}
 
 #send-btn {
   flex-shrink: 0;
