@@ -69,14 +69,35 @@ async function deleteSource(e, src) {
     });
     const data = await r.json();
     if (data.ok) {
-      Swal.fire('Deleted!', 'Source deleted successfully.', 'success');
+      Swal.fire({ 
+        text: 'Chunk removido com sucesso.', 
+        icon: 'success',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
       if (state.source === src) clearSearch();
       await loadStats();
     } else {
-      Swal.fire('Error', data.error || 'unknown', 'error');
+      Swal.fire({ 
+        text: data.error || 'unknown', 
+        icon: 'error',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
     }
   } catch (err) {
-    Swal.fire('Error', err.message, 'error');
+    Swal.fire({ 
+      text: err.message, 
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      customClass: {
+        popup: 'custom-swal',
+      }
+    });
   }
 }
 
@@ -303,12 +324,33 @@ async function clearAllChunks() {
     if (data.ok) {
       clearSearch();
       await loadStats();
-      Swal.fire('Success!', `Done — ${data.deleted.toLocaleString()} chunk(s) removed.`, 'success');
+      Swal.fire({ 
+        text: `Concluído — ${data.deleted.toLocaleString()} chunk(s) removido(s).`, 
+        icon: 'success',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
     } else {
-      Swal.fire('Reset failed', data.error || 'unknown', 'error');
+      Swal.fire({ 
+        text: data.error || 'unknown', 
+        icon: 'error',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
     }
   } catch (err) {
-    Swal.fire('Reset failed', err.message, 'error');
+    Swal.fire({ 
+      text: err.message, 
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      customClass: {
+        popup: 'custom-swal',
+      }
+    });
   }
 }
 
@@ -334,14 +376,35 @@ async function resetCollection() {
     const r = await fetch('/api/reset-collection', { method: 'POST' });
     const data = await r.json();
     if (data.ok) {
-      Swal.fire('Success!', 'Collection reset successfully', 'success');
+      Swal.fire({ 
+        text: 'Collection resetada com sucesso.', 
+        icon: 'success',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
       clearSearch();
       await loadStats();
     } else {
-      Swal.fire('Reset failed', data.error || 'unknown', 'error');
+      Swal.fire({
+        text: data.error || 'unknown', 
+        icon: 'error',
+        confirmButtonColor: '#1e3a5f',
+        customClass: {
+          popup: 'custom-swal',
+        }
+      });
     }
   } catch (err) {
-    Swal.fire('Reset failed', err.message, 'error');
+    Swal.fire({
+      text: err.message, 
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      customClass: {
+        popup: 'custom-swal',
+      }
+    });
   }
 }
 
