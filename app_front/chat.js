@@ -67,7 +67,19 @@ function appendMessage(role, text, sources) {
     sources.forEach(s => {
       const tag = document.createElement("span");
       tag.className = "source-tag";
-      tag.textContent = s;
+
+      if (s.includes('ticket_')) {
+        const link = document.createElement("a");
+        const ticketNumber = s.replace('ticket_', '');
+        link.href = `https://kundencloud.com.br:3825/atendimento?id=${ticketNumber}&callType=customer`;
+        link.target = '_blank';
+        link.className = "source-tag-link";
+        link.textContent = s;
+        tag.appendChild(link);
+      } else {
+        tag.textContent = s;
+      }
+
       bar.appendChild(tag);
     });
     bubble.appendChild(bar);
@@ -152,7 +164,7 @@ async function sendMessage() {
     }
   } catch (e) {
     typingRow.remove();
-    appendError("Could not reach the chat backend. Is the server running?");
+    appendError("Could not reach the chat backend. Err: " + e);
     history.pop();
   }
 

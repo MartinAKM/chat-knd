@@ -231,6 +231,10 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
   font-family: monospace;
 }
 
+.source-tag-link {
+  text-decoration: none;
+}
+
 /* Typing indicator */
 .typing-bubble {
   background: #fff;
