@@ -2,6 +2,15 @@
 
 RAG-based AI assistant for Kunden Systems ERP consultants. Consultants receive Oracle Forms ERP support tickets and need fast answers from historical solutions and documentation.
 
+## User roles
+
+| Role | Access |
+|---|---|
+| `admin` | Full access — Document Viewer, Chat, all API endpoints |
+| `user` | Chat only |
+
+The first account created automatically becomes `admin`. All subsequent accounts are `user` by default; role changes must be made directly in `auth.db`. Users can reset their password via an email link (requires SMTP env vars).
+
 ## How it works
 
 1. ERP documents (PDF, DOCX, TXT, MD) and Oracle support tickets are ingested into a local ChromaDB vector store
@@ -60,7 +69,9 @@ Navigate to **Chat** in the top nav (or go to `http://localhost:8001/chat`).
 - Type a question and press **Enter** (Shift+Enter for a newline)
 - The assistant searches the knowledge base via hybrid retrieval and answers in Brazilian Portuguese
 - Source documents used as context are shown below each answer as pills
-- Click **New conversation** to clear the history and start over
+- Conversation history is persisted per-user in `chat_history/<user_id>/` and shown in the sidebar
+- Click **New Chat** in the sidebar to start a new conversation, or click a past conversation to resume it
+- The assistant uses recent exchanges as context, so follow-up questions like "temos atendimentos sobre isso?" resolve correctly
 
 ## Document Viewer
 
@@ -142,15 +153,23 @@ ERP program codes (e.g. `CFAB24`, `EPRO15`) are also auto-detected from the user
 ```
 ChatKND/
 ├── app_front/
-│   ├── viewer.html      # Document Viewer markup
-│   ├── viewer.css       # Document Viewer styles
-│   ├── viewer.js        # Document Viewer client logic
-│   ├── chat.html        # Chat interface markup
-│   ├── chat.css         # Chat interface styles
-│   ├── chat.js          # Chat interface client logic
-│   └── viewer.py        # HTTP server — serves static files and /api/* routes
+│   ├── viewer.html         # Document Viewer markup
+│   ├── viewer.css          # Document Viewer styles
+│   ├── viewer.js           # Document Viewer client logic
+│   ├── chat.html           # Chat interface markup
+│   ├── chat.css            # Chat interface styles
+│   ├── chat.js             # Chat interface client logic
+│   ├── login.html          # Login page
+│   ├── signup.html         # Sign-up page
+│   ├── reset_password.html # Password reset request page
+│   ├── set_password.html   # New password form (token from email)
+│   ├── auth.css            # Shared auth page styles
+│   └── viewer.py           # HTTP server — serves static files and /api/* routes
+├── auth/
+│   └── db.py               # SQLite auth (users, sessions, password reset tokens)
 ├── chat_api/
-│   └── chat.py          # Hybrid RAG retrieval + Ollama generation
+│   ├── chat.py             # Hybrid RAG retrieval + Ollama generation
+│   └── history.py          # Per-user persistent conversation history
 ├── doc_reader/
 │   ├── reader.py        # Text extraction (PDF, DOCX, TXT, MD)
 │   ├── cleaner.py       # Text normalisation and block removal
@@ -180,5 +199,9 @@ See `.env.example` for the full list with descriptions. Key variables:
 | `CHAT_MODEL` | LLM for chat (default: `gemma4:31b-cloud`) |
 | `SUMMARIZE_MODEL` | LLM for ticket summarisation (defaults to `CHAT_MODEL`) |
 | `VIEWER_PORT` | Web server port (default: `8001`) |
+| `CHAT_HISTORY_DIR` | Directory for per-user chat history (default: `chat_history/`) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP server for password reset emails |
+| `SMTP_FROM` | Sender address for password reset emails |
+| `APP_URL` | Public base URL used in reset email links (e.g. `http://localhost:8001`) |
 
 `.env` is never committed. Copy `.env.example` to get started.

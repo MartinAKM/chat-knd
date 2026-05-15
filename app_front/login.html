@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatKND — Login</title>
+  <link rel="stylesheet" href="/auth.css" />
+</head>
+<body>
+<div class="auth-card">
+  <div class="auth-logo">
+    <div class="auth-logo-mark">KND</div>
+    <span class="auth-logo-text">ChatKND</span>
+  </div>
+  <h1>Bem-vindo de volta</h1>
+  <p class="auth-sub">Entre com sua conta para continuar.</p>
+
+  <div id="msg" class="msg error" style="display:none"></div>
+
+  <form id="form">
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" autocomplete="email" required />
+    </div>
+    <div class="field">
+      <label for="password">Senha</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required />
+      <a href="/reset-password" class="auth-link">Esqueceu a senha?</a>
+    </div>
+    <button type="submit" class="btn-primary" id="btn">Entrar</button>
+  </form>
+
+  <p class="auth-footer">Não tem conta? <a href="/signup">Criar conta</a></p>
+</div>
+
+<script>
+const form  = document.getElementById("form");
+const msgEl = document.getElementById("msg");
+const btn   = document.getElementById("btn");
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  msgEl.style.display = "none";
+  btn.disabled = true;
+  btn.textContent = "Entrando…";
+  try {
+    const res  = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: form.email.value.trim(), password: form.password.value }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = data.redirect || "/chat";
+    } else {
+      msgEl.textContent = data.error || "Erro ao entrar.";
+      msgEl.style.display = "";
+    }
+  } catch {
+    msgEl.textContent = "Erro de conexão. Tente novamente.";
+    msgEl.style.display = "";
+  }
+  btn.disabled = false;
+  btn.textContent = "Entrar";
+});
+</script>
+</body>
+</html>

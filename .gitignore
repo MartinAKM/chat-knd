@@ -19,6 +19,12 @@ chroma_data/
 # Ingested documents (may contain client data)
 doc_reader/data/documents/
 
+# Auth database (contains user credentials)
+auth.db
+
+# Per-user chat history (may contain client data)
+chat_history/
+
 # Claude Code local settings
 .claude/settings.local.json
 

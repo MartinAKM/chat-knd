@@ -12,36 +12,49 @@
 <header>
   <h1>ChatKND</h1>
   <nav>
-    <a href="/" class="nav-link">Document Viewer</a>
+    <a href="/" class="nav-link" id="nav-viewer" style="display:none">Document Viewer</a>
     <a href="/chat" class="nav-link active">Chat</a>
   </nav>
-  <button class="new-chat-btn" onclick="newConversation()">New conversation</button>
+  <div class="header-user">
+    <span id="header-user-name"></span>
+    <button class="logout-btn" onclick="logout()">Sair</button>
+  </div>
 </header>
 
-<div class="chat-layout">
-  <div class="thread" id="thread">
-    <div class="welcome" id="welcome">
-      <div class="welcome-logo">KND</div>
-      <p class="welcome-title">ERP Support Assistant</p>
-      <p class="welcome-sub">Ask anything about support tickets or ERP documentation.</p>
+<div class="app-layout">
+
+  <aside class="history-sidebar">
+    <button class="sidebar-new-btn" onclick="newConversation()">+ New Chat</button>
+    <div class="history-list" id="history-list"></div>
+  </aside>
+
+  <div class="chat-layout">
+    <div class="thread" id="thread">
+      <div class="welcome" id="welcome">
+        <div class="welcome-logo">KND</div>
+        <p class="welcome-title">ERP Support Assistant</p>
+        <p class="welcome-sub">Ask anything about support tickets or ERP documentation.</p>
+      </div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea
+          id="msg-input"
+          placeholder="Ask a question…"
+          rows="1"
+          oninput="autoResize(this)"
+          onkeydown="onKey(event)"
+        ></textarea>
+        <button id="send-btn" onclick="sendMessage()">Send</button>
+      </div>
+      <p class="composer-hint">Enter to send &nbsp;·&nbsp; Shift+Enter for new line</p>
     </div>
   </div>
 
-  <div class="composer-wrap">
-    <div class="composer">
-      <textarea
-        id="msg-input"
-        placeholder="Ask a question…"
-        rows="1"
-        oninput="autoResize(this)"
-        onkeydown="onKey(event)"
-      ></textarea>
-      <button id="send-btn" onclick="sendMessage()">Send</button>
-    </div>
-    <p class="composer-hint">Enter to send &nbsp;·&nbsp; Shift+Enter for new line</p>
-  </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>

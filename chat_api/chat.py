@@ -13,9 +13,13 @@ from dotenv import load_dotenv
 _ROOT = Path(__file__).parent.parent
 load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(_ROOT / "doc_reader"))
+sys.path.insert(0, str(_ROOT))
 
-from chroma_store import get_collection  # noqa: E402
-from reranker import rerank  # noqa: E402
+from chroma_store import get_collection          # noqa: E402
+from reranker import rerank                      # noqa: E402
+from chat_api.history import (                   # noqa: E402
+    append_exchange, create_conversation,
+)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 CHAT_MODEL      = os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
@@ -27,6 +31,7 @@ _CONTEXT_RESULTS     = 5   # max chunks from semantic search
 _KEYWORD_RESULTS     = 5   # max extra chunks from keyword search
 _DATE_RESULTS        = 10  # max chunks from date-filtered search
 _MIN_PROXIMITY       = 60.0
+_MAX_HISTORY_TURNS   = 10  # prior messages kept in LLM context (5 exchanges)
 
 # Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
 _ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
@@ -315,9 +320,54 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         return "", []
 
 
+# ── Conversation-aware RAG query ───────────────────────────────────────────
+
+_FOLLOWUP_RE = re.compile(
+    r"\b(isso|este|esta|esse|essa|aquele|aquela|ele|ela|eles|elas|"
+    r"primeiro|segundo|terceiro|último|anterior|próximo|"
+    r"mais detalhes?|explique|continue|e o|e a|e os|e as)\b",
+    re.IGNORECASE,
+)
+
+
+def _build_rag_query(question: str, history: list[dict]) -> str:
+    """
+    For short or pronoun-heavy follow-up questions the current question
+    carries too little semantic signal for a useful vector search.
+
+    Strategy:
+    - Collect the last 2 prior user questions (captures the topic even when
+      there is an intermediate vague question like "qual é o programa?")
+    - Append the first 150 chars of the last assistant response, which often
+      contains the exact terms the user is referring to with "isso/ele/ela"
+    - Combine with the current question (capped at 400 chars total)
+    """
+    is_followup = len(question.strip()) < 80 or bool(_FOLLOWUP_RE.search(question))
+    if not is_followup or not history:
+        return question
+
+    prior = history[:-1]  # exclude the current question entry
+    prior_user: list[str] = []
+    last_assistant: str = ""
+
+    for msg in reversed(prior):
+        if msg["role"] == "assistant" and not last_assistant:
+            last_assistant = msg["content"].strip()[:150]
+        elif msg["role"] == "user" and len(prior_user) < 2:
+            prior_user.append(msg["content"].strip())
+        if len(prior_user) == 2 and last_assistant:
+            break
+
+    parts = list(reversed(prior_user))  # chronological order
+    if last_assistant:
+        parts.append(last_assistant)
+    parts.append(question)
+    return " ".join(parts)[:400]
+
+
 # ── Generation ─────────────────────────────────────────────────────────────
 
-def generate(question: str, history: list[dict]) -> dict:
+def generate(question: str, history: list[dict], conversation_id: str | None = None, user_id: str | None = None) -> dict:
     """
     Retrieve relevant context from ChromaDB, inject it into the current user
     message, then call Ollama with the full conversation history.
@@ -325,11 +375,12 @@ def generate(question: str, history: list[dict]) -> dict:
     `history` already contains the current question as its last entry
     (the frontend appends it before sending the request).
 
-    Returns {"answer": str, "sources": [str, ...]}.
+    Returns {"answer": str, "sources": [str, ...], "conversation_id": str}.
     """
     _ensure_running()
 
-    context, sources = _retrieve_context(question)
+    rag_query = _build_rag_query(question, history)
+    context, sources = _retrieve_context(rag_query)
 
     if context:
         current_content = (
@@ -342,6 +393,8 @@ def generate(question: str, history: list[dict]) -> dict:
         current_content = question
 
     prior_turns = history[:-1] if history else []
+    if len(prior_turns) > _MAX_HISTORY_TURNS:
+        prior_turns = prior_turns[-_MAX_HISTORY_TURNS:]
 
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
     messages += prior_turns
@@ -363,7 +416,14 @@ def generate(question: str, history: list[dict]) -> dict:
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
             data = json.loads(r.read())
-            return {"answer": data["message"]["content"], "sources": sources}
+            answer = data["message"]["content"]
+
+            if user_id:
+                if not conversation_id:
+                    conversation_id = create_conversation(question, user_id)
+                append_exchange(conversation_id, user_id, question, answer, sources)
+
+            return {"answer": answer, "sources": sources, "conversation_id": conversation_id}
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         raise RuntimeError(f"Ollama returned {e.code}: {body}")

@@ -16,12 +16,22 @@ from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_text
 from reranker import rerank
 from chat_api.chat import generate as chat_generate
+from chat_api.history import (
+    delete_conversation, get_conversation, list_conversations,
+)
+from auth.db import (
+    authenticate, consume_reset_token, create_reset_token,
+    create_session, create_user, delete_session,
+    get_session_user, init_db, send_reset_email,
+    SESSION_DAYS,
+)
 
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 load_dotenv()
+init_db()
 
 CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
@@ -33,6 +43,14 @@ _STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css":  "text/css; charset=utf-8",
     ".js":   "application/javascript; charset=utf-8",
+}
+
+# Public auth pages — served without any session check
+_AUTH_ROUTES = {
+    "/login":          "login.html",
+    "/signup":         "signup.html",
+    "/reset-password": "reset_password.html",
+    "/set-password":   "set_password.html",
 }
 
 
@@ -312,11 +330,50 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # suppress per-request logs
 
-    def send_json(self, data):
+    # ── Auth helpers ──────────────────────────────────────────────────────
+
+    def _session_token(self) -> str | None:
+        for part in self.headers.get("Cookie", "").split(";"):
+            part = part.strip()
+            if part.startswith("session="):
+                return part[8:].strip() or None
+        return None
+
+    def _current_user(self) -> dict | None:
+        token = self._session_token()
+        return get_session_user(token) if token else None
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.end_headers()
+
+    def _require_role(self, role: str = "user", api: bool = False) -> dict | None:
+        """Return user if authenticated with sufficient role, else send 401/403/redirect."""
+        user = self._current_user()
+        if not user:
+            if api:
+                self.send_json({"error": "Unauthorized"}, status=401)
+            else:
+                self._redirect("/login")
+            return None
+        if role == "admin" and user["role"] != "admin":
+            if api:
+                self.send_json({"error": "Forbidden"}, status=403)
+            else:
+                self._redirect("/chat")
+            return None
+        return user
+
+    # ── Response helpers ──────────────────────────────────────────────────
+
+    def send_json(self, data, status: int = 200, extra_headers: dict | None = None):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -332,38 +389,79 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        path = parsed.path
+        path   = parsed.path
         params = parse_qs(parsed.query)
 
         try:
+            # ── Public: auth pages & shared static assets ──────────────────
+            if path in _AUTH_ROUTES:
+                self.serve_static(_AUTH_ROUTES[path])
+                return
+
+            if path == "/auth.css":
+                self.serve_static("auth.css")
+                return
+
+            # Static assets (CSS/JS) are public — data is behind API auth
+            if path in ("/viewer.css", "/viewer.js", "/chat.css", "/chat.js"):
+                self.serve_static(path.lstrip("/"))
+                return
+
+            # ── Public: auth API ───────────────────────────────────────────
+            if path == "/api/auth/me":
+                user = self._require_role(api=True)
+                if user:
+                    self.send_json({k: user[k] for k in ("id", "name", "surname", "email", "role")})
+                return
+
+            # ── Admin-only HTML ────────────────────────────────────────────
             if path == "/":
-                self.serve_static("viewer.html")
+                if self._require_role("admin"):
+                    self.serve_static("viewer.html")
+                return
 
-            elif path in ("/viewer.css", "/viewer.js"):
-                self.serve_static(path.lstrip("/"))
+            # ── User-or-admin HTML ─────────────────────────────────────────
+            if path == "/chat":
+                if self._require_role("user"):
+                    self.serve_static("chat.html")
+                return
 
-            elif path == "/chat":
-                self.serve_static("chat.html")
-
-            elif path in ("/chat.css", "/chat.js"):
-                self.serve_static(path.lstrip("/"))
-
-            elif path == "/api/stats":
+            # ── Admin-only API ─────────────────────────────────────────────
+            if path == "/api/stats":
+                if not self._require_role("admin", api=True): return
                 self.send_json(get_stats())
 
             elif path == "/api/documents":
-                page = int(params.get("page", [1])[0])
+                if not self._require_role("admin", api=True): return
+                page      = int(params.get("page", [1])[0])
                 page_size = int(params.get("page_size", [30])[0])
-                source = params.get("source", [None])[0]
+                source    = params.get("source", [None])[0]
                 self.send_json(get_documents(page, page_size, source))
 
             elif path == "/api/search":
-                query = params.get("q", [""])[0]
-                self.send_json(do_search(query))
+                if not self._require_role("admin", api=True): return
+                self.send_json(do_search(params.get("q", [""])[0]))
 
             elif path == "/api/semantic-search":
-                query = params.get("q", [""])[0]
-                self.send_json(do_semantic_search(query))
+                if not self._require_role("admin", api=True): return
+                self.send_json(do_semantic_search(params.get("q", [""])[0]))
+
+            # ── User-or-admin API ──────────────────────────────────────────
+            elif path == "/api/history":
+                user = self._require_role("user", api=True)
+                if not user: return
+                self.send_json({"conversations": list_conversations(user["id"])})
+
+            elif path.startswith("/api/history/"):
+                user = self._require_role("user", api=True)
+                if not user: return
+                conv_id = path[len("/api/history/"):]
+                conv    = get_conversation(conv_id, user["id"])
+                if conv:
+                    self.send_json(conv)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
 
             else:
                 self.send_response(404)
@@ -374,40 +472,122 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/delete":
-            self.send_response(404)
-            self.end_headers()
-            return
         try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-            self.send_json(handle_delete(body))
+            if parsed.path == "/api/delete":
+                if not self._require_role("admin", api=True): return
+                length = int(self.headers.get("Content-Length", 0))
+                self.send_json(handle_delete(self.rfile.read(length)))
+            elif parsed.path.startswith("/api/history/"):
+                user = self._require_role("user", api=True)
+                if not user: return
+                conv_id = parsed.path[len("/api/history/"):]
+                self.send_json({"ok": delete_conversation(conv_id, user["id"])})
+            else:
+                self.send_response(404)
+                self.end_headers()
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)})
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        p = parsed.path
         try:
-            if parsed.path == "/api/reset-collection":
+            length = int(self.headers.get("Content-Length", 0))
+
+            # ── Public auth endpoints ──────────────────────────────────────
+            if p == "/api/auth/login":
+                body  = json.loads(self.rfile.read(length))
+                email = body.get("email", "").strip().lower()
+                pwd   = body.get("password", "")
+                user  = authenticate(email, pwd)
+                if not user:
+                    self.send_json({"ok": False, "error": "Email ou senha incorretos."})
+                    return
+                token    = create_session(user["id"])
+                cookie   = f"session={token}; Path=/; HttpOnly; Max-Age={SESSION_DAYS * 86400}; SameSite=Lax"
+                redirect = "/" if user["role"] == "admin" else "/chat"
+                self.send_json({"ok": True, "redirect": redirect}, extra_headers={"Set-Cookie": cookie})
+
+            elif p == "/api/auth/signup":
+                body    = json.loads(self.rfile.read(length))
+                name    = body.get("name", "").strip()
+                surname = body.get("surname", "").strip()
+                email   = body.get("email", "").strip().lower()
+                pwd     = body.get("password", "")
+                if not all([name, surname, email, pwd]):
+                    self.send_json({"ok": False, "error": "Todos os campos são obrigatórios."})
+                    return
+                if len(pwd) < 8:
+                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 8 caracteres."})
+                    return
+                user = create_user(name, surname, email, pwd)
+                if not user:
+                    self.send_json({"ok": False, "error": "Este email já está em uso."})
+                    return
+                self.send_json({"ok": True})
+
+            elif p == "/api/auth/logout":
+                token = self._session_token()
+                if token:
+                    delete_session(token)
+                cookie = "session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax"
+                self.send_json({"ok": True}, extra_headers={"Set-Cookie": cookie})
+
+            elif p == "/api/auth/reset-password":
+                body  = json.loads(self.rfile.read(length))
+                email = body.get("email", "").strip().lower()
+                token = create_reset_token(email)
+                if token:
+                    try:
+                        send_reset_email(email, token)
+                    except Exception:
+                        pass  # never reveal email existence or SMTP errors
+                self.send_json({"ok": True})  # always ok to prevent email enumeration
+
+            elif p == "/api/auth/set-password":
+                body  = json.loads(self.rfile.read(length))
+                token = body.get("token", "").strip()
+                pwd   = body.get("password", "")
+                if len(pwd) < 8:
+                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 8 caracteres."})
+                    return
+                ok = consume_reset_token(token, pwd)
+                if ok:
+                    self.send_json({"ok": True})
+                else:
+                    self.send_json({"ok": False, "error": "Link inválido ou expirado."})
+
+            # ── Admin-only endpoints ───────────────────────────────────────
+            elif p == "/api/reset-collection":
+                if not self._require_role("admin", api=True): return
                 self.send_json(handle_reset_collection())
-            elif parsed.path == "/api/clear-all":
+
+            elif p == "/api/clear-all":
+                if not self._require_role("admin", api=True): return
                 self.send_json(handle_clear_all_chunks())
-            elif parsed.path == "/api/ingest":
+
+            elif p == "/api/ingest":
+                if not self._require_role("admin", api=True): return
                 content_type = self.headers.get("Content-Type", "")
-                content_length = int(self.headers.get("Content-Length", 0))
-                self.send_json(do_ingest(self.rfile, content_type, content_length))
-            elif parsed.path == "/api/chat":
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length))
-                question = body.get("question", "").strip()
-                history  = body.get("history", [])
+                self.send_json(do_ingest(self.rfile, content_type, length))
+
+            # ── User-or-admin endpoints ────────────────────────────────────
+            elif p == "/api/chat":
+                user = self._require_role("user", api=True)
+                if not user: return
+                body            = json.loads(self.rfile.read(length))
+                question        = body.get("question", "").strip()
+                history         = body.get("history", [])
+                conversation_id = body.get("conversation_id") or None
                 if not question:
                     self.send_json({"error": "Missing 'question' field"})
                 else:
-                    self.send_json(chat_generate(question, history))
+                    self.send_json(chat_generate(question, history, conversation_id, user["id"]))
+
             else:
                 self.send_response(404)
                 self.end_headers()
+
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)})
 
