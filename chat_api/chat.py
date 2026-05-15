@@ -15,6 +15,7 @@ load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(_ROOT / "doc_reader"))
 
 from chroma_store import get_collection  # noqa: E402
+from reranker import rerank  # noqa: E402
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 CHAT_MODEL      = os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
@@ -249,10 +250,10 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         # Value: (document_text, metadata, proximity_pct)
         seen: dict[str, tuple[str, dict, float]] = {}
 
-        # 1. Semantic search
+        # 1. Semantic search — fetch 3× to give the reranker wider candidate pool
         res = col.query(
             query_texts=[question],
-            n_results=min(_CONTEXT_RESULTS, count),
+            n_results=min(_CONTEXT_RESULTS * 3, count),
             include=["documents", "metadatas", "distances"],
         )
         for doc_id, doc, meta, dist in zip(
@@ -295,9 +296,11 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         if not seen:
             return "", []
 
-        # Sort by proximity descending; keyword/date hits (100.0) surface first
-        ranked = sorted(seen.values(), key=lambda x: x[2], reverse=True)
-        top    = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
+        # Rerank all candidates with a cross-encoder for better relevance ordering.
+        candidates = list(seen.values())  # each: (text, meta, proximity)
+        order = rerank(question, [c[0] for c in candidates])
+        ranked = [candidates[i] for i in order]
+        top = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
 
         context = "\n---\n".join(entry[0] for entry in top)
         sources: list[str] = []

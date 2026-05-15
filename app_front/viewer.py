@@ -14,6 +14,7 @@ from chunker import chunk_text
 from chroma_store import get_collection, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_text
+from reranker import rerank
 from chat_api.chat import generate as chat_generate
 
 
@@ -152,10 +153,12 @@ def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -
     if count == 0:
         return {"results": [], "query": query}
 
+    # Fetch 2× candidates so the reranker has more material to work with.
+    fetch_n = min(n_results * 2, count)
     try:
         res = col.query(
             query_texts=[query],
-            n_results=min(n_results, count),
+            n_results=fetch_n,
             include=["documents", "metadatas", "distances"],
         )
     except Exception as e:
@@ -184,8 +187,11 @@ def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -
             "proximity": pct,
         })
 
-    results.sort(key=lambda x: x["proximity"], reverse=True)
-    return {"results": results, "query": query}
+    if results:
+        order = rerank(query, [r["text"] for r in results])
+        results = [results[i] for i in order]
+
+    return {"results": results[:n_results], "query": query}
 
 
 def handle_delete(body_bytes: bytes):
