@@ -39,6 +39,15 @@ _ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
 # Matches ticket numbers: YYMMDD + 3-digit sequence (e.g. 250922016)
 _TICKET_RE = re.compile(r"\b2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}\b")
 
+# Matches ERP/Oracle message codes (e.g. KND-00423, ORA-06512)
+_MSG_CODE_RE = re.compile(r"\b(KND-\d+|ORA-\d+)\b", re.IGNORECASE)
+
+# Matches "pedido de serviço <code>" / "pedido serviço <code>" in the question
+_PEDIDO_RE = re.compile(
+    r"\bpedido\s+de\s+servi[çc]o\s*[:\-]?\s*([A-Za-z0-9][\w\-]*)",
+    re.IGNORECASE,
+)
+
 # ── Date extraction ────────────────────────────────────────────────────────
 
 _MONTH_MAP = {
@@ -190,6 +199,19 @@ def _extract_keywords(question: str) -> list[str]:
         ticket = match.group()
         if ticket not in found:
             found.append(ticket)
+
+    # Message codes (KND-XXXXX, ORA-XXXXXX) — match against the Mensagens: field
+    for match in _MSG_CODE_RE.finditer(question):
+        code = match.group().upper()
+        if code not in found:
+            found.append(code)
+
+    # Pedido de Serviço — search for the exact "Pedido de Serviço: <value>" substring
+    m = _PEDIDO_RE.search(question)
+    if m:
+        pedido_key = f"Pedido de Serviço: {m.group(1)}"
+        if pedido_key not in found:
+            found.append(pedido_key)
 
     # Configured terms (case-insensitive word-boundary match)
     for term in _CONFIGURED_KEYWORDS:
