@@ -434,6 +434,7 @@ details[open] > .sources-toggle::before {
 
 .composer textarea {
   flex: 1;
+  align-self: stretch;
   border: none;
   outline: none;
   resize: none;
@@ -442,10 +443,11 @@ details[open] > .sources-toggle::before {
   line-height: 1.5;
   color: #1e293b;
   max-height: 180px;
-  overflow-y: auto;
+  overflow-y: hidden;
   background: transparent;
   min-height: 32px;
-  align-content: center;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 .composer textarea::placeholder { color: #94a3b8; }
 
@@ -523,10 +525,9 @@ details[open] > .sources-toggle::before {
   display: block;
 }
 
-#send-btn {
+#send-btn, #stop-btn {
   flex-shrink: 0;
   padding: 8px 18px;
-  background: #1e3a5f;
   color: #fff;
   border: none;
   border-radius: 7px;
@@ -536,8 +537,11 @@ details[open] > .sources-toggle::before {
   transition: opacity .15s;
   align-self: flex-end;
 }
+#send-btn { background: #1e3a5f; }
 #send-btn:hover   { opacity: .85; }
 #send-btn:disabled { opacity: .4; cursor: default; }
+#stop-btn { background: #dc2626; }
+#stop-btn:hover { opacity: .85; }
 
 .composer-hint {
   text-align: center;

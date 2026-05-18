@@ -1,18 +1,26 @@
 const thread  = document.getElementById("thread");
 const input   = document.getElementById("msg-input");
 const sendBtn = document.getElementById("send-btn");
+const stopBtn = document.getElementById("stop-btn");
 const welcome = document.getElementById("welcome");
 
 marked.use({ breaks: true, gfm: true });
 
 let busy = false;
+let abortController = null;
 let attachedImages = []; // { dataUrl, base64 }
+
+function stopGeneration() {
+  if (abortController) abortController.abort();
+}
 
 // ── Input helpers ──────────────────────────────────────────────────────────
 
 function autoResize(el) {
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + "px";
+  el.style.height = "0";
+  const h = el.scrollHeight;
+  el.style.height = h + "px";
+  el.style.overflowY = h >= 170 ? "auto" : "hidden";
 }
 
 function onKey(e) {
@@ -223,11 +231,15 @@ async function sendMessage() {
   if (!text && !images.length) return;
 
   busy = true;
-  sendBtn.disabled = true;
+  sendBtn.style.display = "none";
+  stopBtn.style.display = "";
   input.disabled = true;
+  abortController = new AbortController();
 
   input.value = "";
-  autoResize(input);
+  input.style.height = "";
+  input.style.overflowY = "hidden";
+  input.scrollTop = 0;
   attachedImages = [];
   renderImagePreviews();
 
@@ -290,6 +302,7 @@ async function sendMessage() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: abortController.signal,
       body: JSON.stringify({
         question: text,
         history,
@@ -351,13 +364,26 @@ async function sendMessage() {
       }
     }
   } catch (e) {
-    typingRow.remove();
-    appendError("Não foi possível estabelecer conexão com o sistema de respostas. Erro: " + e);
-    history.pop();
+    if (e.name === "AbortError") {
+      // User stopped generation — keep whatever arrived so far
+      if (assistantRow) {
+        finalizeStreamingBubble([]);
+        history.push({ role: "assistant", content: fullAnswer });
+      } else {
+        typingRow.remove();
+        history.pop();
+      }
+    } else {
+      typingRow.remove();
+      appendError("Não foi possível estabelecer conexão com o sistema de respostas. Erro: " + e);
+      history.pop();
+    }
   }
 
   busy = false;
-  sendBtn.disabled = false;
+  abortController = null;
+  sendBtn.style.display = "";
+  stopBtn.style.display = "none";
   input.disabled = false;
   input.focus();
 }
