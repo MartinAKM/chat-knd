@@ -2,9 +2,10 @@
 pypdf>=4.0.0
 python-docx>=1.1.0
 
-# --- Vector store + embeddings ---
+# --- Vector store + embeddings + reranking ---
 chromadb>=0.5.0
 sentence-transformers>=3.0.0
+torch>=2.0.0
 
 # --- Oracle database ---
 oracledb>=2.0.0

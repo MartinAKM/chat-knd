@@ -14,7 +14,6 @@ async function loadStats() {
   if (col) {
     document.getElementById('s-chunks').textContent = col.count.toLocaleString();
     document.getElementById('s-sources').textContent = col.sources.length;
-    document.getElementById('col-badge').textContent = 'collection: ' + col.name;
     renderSources(col.sources, col.source_counts);
   }
 }
@@ -52,6 +51,7 @@ async function deleteSource(e, src) {
     cancelButtonColor: '#6b7280',
     confirmButtonText: 'Deletar',
     cancelButtonText: 'Cancelar',
+    heightAuto: false,
     customClass: {
       popup: 'custom-swal',
       confirmButton: 'custom-confirm-btn',
@@ -73,6 +73,7 @@ async function deleteSource(e, src) {
         text: 'Chunk removido com sucesso.', 
         icon: 'success',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -84,6 +85,7 @@ async function deleteSource(e, src) {
         text: data.error || 'unknown', 
         icon: 'error',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -94,6 +96,7 @@ async function deleteSource(e, src) {
       text: err.message, 
       icon: 'error',
       confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
       customClass: {
         popup: 'custom-swal',
       }
@@ -309,6 +312,7 @@ async function clearAllChunks() {
     cancelButtonColor: '#6b7280',
     confirmButtonText: 'Deletar Todos',
     cancelButtonText: 'Cancelar',
+    heightAuto: false,
     customClass: {
       popup: 'custom-swal',
       confirmButton: 'custom-confirm-btn',
@@ -328,6 +332,7 @@ async function clearAllChunks() {
         text: `Concluído — ${data.deleted.toLocaleString()} chunk(s) removido(s).`, 
         icon: 'success',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -337,6 +342,7 @@ async function clearAllChunks() {
         text: data.error || 'unknown', 
         icon: 'error',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -347,6 +353,7 @@ async function clearAllChunks() {
       text: err.message, 
       icon: 'error',
       confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
       customClass: {
         popup: 'custom-swal',
       }
@@ -356,13 +363,14 @@ async function clearAllChunks() {
 
 async function resetCollection() {
   const result = await Swal.fire({
-    text: 'Tem certeza que deseja recriar a Collection?',
+    text: 'Tem certeza que deseja deletar a Collection?',
     icon: 'question',
     showCancelButton: true,
     confirmButtonColor: '#1e3a5f',
     cancelButtonColor: '#6b7280',
-    confirmButtonText: 'Resetar Collection',
+    confirmButtonText: 'Deletar',
     cancelButtonText: 'Cancelar',
+    heightAuto: false,
     customClass: {
       popup: 'custom-swal',
       confirmButton: 'custom-confirm-btn',
@@ -377,9 +385,10 @@ async function resetCollection() {
     const data = await r.json();
     if (data.ok) {
       Swal.fire({ 
-        text: 'Collection resetada com sucesso.', 
+        text: 'Collection deletada com sucesso.', 
         icon: 'success',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -391,6 +400,7 @@ async function resetCollection() {
         text: data.error || 'unknown', 
         icon: 'error',
         confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
         customClass: {
           popup: 'custom-swal',
         }
@@ -401,6 +411,7 @@ async function resetCollection() {
       text: err.message, 
       icon: 'error',
       confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
       customClass: {
         popup: 'custom-swal',
       }
@@ -409,3 +420,57 @@ async function resetCollection() {
 }
 
 loadStats();
+
+function renderCollections(collections) {
+  const container = document.getElementById('collections-list');
+
+  container.innerHTML = collections.map(col => `
+    <div class="collection-card">
+
+      <div class="collection-header">
+        <div class="collection-name">${col.name}</div>
+
+        ${col.name === 'documents'
+          ? '<div class="collection-badge active">ATIVO</div>'
+          : '<div class="collection-badge active">INATIVO</div>'
+        }
+      </div>
+
+    <div class="collection-info">
+      <div>
+        <div class="collection-stats">
+          <div class="collection-stat">
+            <span class="label">Chunks</span>
+            <span class="value">${col.count}</span>
+          </div>
+
+          <div class="collection-stat">
+            <span class="label">Arquivos</span>
+            <span class="value">${col.sources.length}</span>
+          </div>
+        </div>
+      </div>
+        <button class="collection-delete-btn" onclick="resetCollection()" title="Deletar coleção">
+          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M9 3V4H4V6H5V19C5 20.1 5.9 21 7 21H17C18.1 21 19 20.1 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/>
+          </svg>
+        </button>
+    </div>
+  `).join('');
+}
+
+async function openModalCollection() {
+  const modal = document.querySelector('.modal-backdrop');
+  modal.classList.toggle('open');
+
+  const data = await api('/api/stats');
+  console.log(data.collections);
+  renderCollections(data.collections);
+}
+
+function closeCollectionActions(event) {
+  if (event.target.classList.contains('modal-backdrop')) {
+    const backdrop = document.querySelector('.modal-backdrop');
+    backdrop.classList.remove('open');
+  }
+}

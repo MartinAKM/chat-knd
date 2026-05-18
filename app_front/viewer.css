@@ -22,7 +22,7 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
 }
 .stat { display: flex; flex-direction: column; }
 .stat-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: #64748b; }
-.stat-value { font-size: 1.25rem; font-weight: 700; color: #1e3a5f; }
+.stat-value { font-size: 1.25rem; font-weight: 700; color: #1e3a5f; text-align: end; }
 
 .workspace { display: flex; flex: 1; overflow: hidden; }
 
@@ -83,7 +83,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .toolbar button.secondary {
   background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;
 }
-.toolbar button.semantic { background: #6d28d9; }
+.toolbar button.semantic { background: #6b7280; }
 .toolbar button.semantic:disabled { opacity: .4; cursor: default; }
 
 .prox-badge {
@@ -174,6 +174,7 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .ingest-status.err { color: #dc2626; }
 
 .clear-btn {
+  display: none;
   margin-left: auto; padding: 5px 14px; background: none;
   border: 1px solid #fca5a5; border-radius: 6px; color: #ef4444;
   font-size: .78rem; cursor: pointer; transition: background .15s, color .15s;
@@ -181,10 +182,66 @@ main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .clear-btn:hover { background: #fee2e2; }
 
 .reset-btn {
+  display: none;
   margin-left: 8px; padding: 5px 14px; background: none;
   border: 1px solid #fca5a5; border-radius: 6px; color: #ef4444;
   font-size: .78rem; cursor: pointer; transition: background .15s, color .15s;
 }
 .reset-btn:hover { background: #fee2e2; }
+
+.collection-actions-btn {
+  margin-left: 8px; padding: 5px 14px; background: none;
+  border: 0px solid #fca5a5; border-radius: 6px; color: #ef4444;
+  font-size: .78rem; cursor: pointer; transition: background .15s, color .15s;
+}
+
+.modal-backdrop {
+  opacity: 0; visibility: hidden; position: fixed; inset: 0; z-index: 9998;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(4px);
+  transition: opacity 220ms cubic-bezier(0.16, 1, 0.3, 1), visibility 220ms;
+}
+.modal-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.modal-collection {
+  position: fixed; z-index: 9998;
+  width: 50%; height: 70%; top: 50%; left: 50%;
+  border: 1px solid  #e2e8f0; border-radius: 6px;
+  background-color: #f8fafc; box-shadow: 0 10px 30px 2px rgba(0, 0, 0, 0.12);
+  transform: translate(-50%, -48%) scale(0.985);
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+}
+
+.collection { cursor: pointer; }
+
 .custom-swal { border-radius: 6px; color: #1e293b;  }
 .custom-confirm-btn, .custom-cancel-btn { border-radius: 6px; }
+
+.collection-title { padding: 18px 15px; background: #1e3a5f; border-radius: 6px 6px 0 0; }
+
+.collection-title h1 { margin: 0; font-size: 1.7rem; font-weight: 600; letter-spacing: .03em; color: #fff; }
+
+.collection-card { background: #fff; border: 1px solid #dbe2ea; padding: 16px; transition: all 0.2s ease; }
+.collection-card:hover { border-color: #1e3a5f; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+.collection-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.collection-name { font-size: 16px; font-weight: 600; color: #1e3a5f; }
+.collection-badge { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: #e8eef7; color: #1e3a5f; }
+.collection-info { display: flex; justify-content: space-between; align-items: center; }
+
+.collection-stats { display: flex; gap: 24px; margin-bottom: 16px; }
+.collection-stat { display: flex; flex-direction: column; }
+.collection-stat .label { font-size: 11px; text-transform: uppercase; color: #7b8794; margin-bottom: 4px; }
+.collection-stat .value { font-size: 18px; font-weight: 700; color: #1e3a5f; align-self: end;}
+
+button.collection-delete-btn { 
+  opacity: 0; border: none; background: none; cursor: pointer; color: #94a3b8; 
+  height: 30px; width: 30px; transition: all 0.18s ease; 
+  display: flex; align-items: center; justify-content: center; border-radius: 6px; 
+}
+button.collection-delete-btn:hover { color: #ef4444; background: #fee2e2; }
+.collection-card:hover .collection-delete-btn { opacity: 1; }
+
+.swal2-container { z-index: 99999; }
