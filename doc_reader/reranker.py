@@ -10,6 +10,11 @@ def _get_model() -> CrossEncoder:
     return CrossEncoder(_MODEL)
 
 
+def warm_up() -> None:
+    """Load the cross-encoder model into memory now instead of on first use."""
+    _get_model()
+
+
 def rerank(query: str, chunks: list[str]) -> list[int]:
     """Return chunk indices sorted by cross-encoder relevance score (best first)."""
     if not chunks:

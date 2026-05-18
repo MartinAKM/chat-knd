@@ -11,11 +11,11 @@ sys.path.insert(0, str(_ROOT / "doc_reader"))
 sys.path.insert(0, str(_ROOT))
 
 from chunker import chunk_text
-from chroma_store import get_collection, upsert_chunks
+from chroma_store import get_collection, invalidate_collection_cache, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_text
-from reranker import rerank
-from chat_api.chat import stream_generate as chat_stream
+from reranker import rerank, warm_up as reranker_warm_up
+from chat_api.chat import stream_generate as chat_stream, _get_known_clients
 from chat_api.history import (
     delete_conversation, get_conversation, list_conversations,
 )
@@ -54,8 +54,14 @@ _AUTH_ROUTES = {
 }
 
 
-def get_client():
-    return chromadb.PersistentClient(path=CHROMA_PATH)
+_chroma_client: chromadb.PersistentClient = None
+
+
+def get_client() -> chromadb.PersistentClient:
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    return _chroma_client
 
 
 def _collect_source_counts(col, total, batch=500):
@@ -271,6 +277,7 @@ def _parse_upload(rfile, content_type: str, content_length: int):
 
 
 def handle_reset_collection():
+    invalidate_collection_cache(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
     client = get_client()
     try:
         client.delete_collection(COLLECTION_NAME)
@@ -608,5 +615,18 @@ if __name__ == "__main__":
     print(f"ChatKND  ->  http://localhost:{PORT}")
     print(f"  Collection : {COLLECTION_NAME}")
     print(f"  Data path  : {CHROMA_PATH}")
+
+    print("  Loading embedding model...", end=" ", flush=True)
+    get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+    print("done")
+
+    print("  Loading reranker model...  ", end=" ", flush=True)
+    reranker_warm_up()
+    print("done")
+
+    print("  Building client cache...   ", end=" ", flush=True)
+    _get_known_clients()
+    print("done")
+
     print("Press Ctrl+C to stop.\n")
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()

@@ -27,11 +27,12 @@ CHROMA_PATH     = os.getenv("CHROMA_PATH", "chroma_data")
 EMBED_MODEL     = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 
-_CONTEXT_RESULTS     = 5   # max chunks from semantic search
-_KEYWORD_RESULTS     = 5   # max extra chunks from keyword search
-_DATE_RESULTS        = 10  # max chunks from date-filtered search
-_MIN_PROXIMITY       = 60.0
-_MAX_HISTORY_TURNS   = 10  # prior messages kept in LLM context (5 exchanges)
+_CONTEXT_RESULTS       = 5   # max chunks from semantic search
+_KEYWORD_RESULTS       = 5   # max extra chunks from keyword search
+_DATE_RESULTS          = 10  # max chunks from date-filtered search
+_MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
+_MIN_DISPLAY_PROXIMITY = 65.0  # minimum score to surface a source in the UI
+_MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
 
 # Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
 _ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
@@ -117,7 +118,6 @@ _SYSTEM_PROMPT = (
     "Quando forem fornecidos trechos de contexto, baseie sua resposta neles. "
     "Responda de forma clara e objetiva. Se não tiver certeza, diga isso."
 )
-
 
 # ── Keyword config ─────────────────────────────────────────────────────────
 
@@ -330,11 +330,14 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         top = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
 
         context = "\n---\n".join(entry[0] for entry in top)
+        # Only surface a source in the UI when its match is confident enough.
+        # Keyword/date chunks are always assigned 100.0 so they always qualify.
         sources: list[str] = []
-        for _, meta, _ in top:
-            src = meta.get("source", "unknown")
-            if src not in sources:
-                sources.append(src)
+        for _, meta, prox in top:
+            if prox >= _MIN_DISPLAY_PROXIMITY:
+                src = meta.get("source", "unknown")
+                if src not in sources:
+                    sources.append(src)
 
         return context, sources
 

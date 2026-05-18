@@ -1,4 +1,9 @@
 const PAGE_SIZE = 30;
+
+async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+}
 let state = { mode: 'all', source: null, query: '', page: 1, total: 0 };
 
 async function api(path) {

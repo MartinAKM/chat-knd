@@ -105,6 +105,37 @@ function renderImagePreviews() {
 
 // ── Rendering helpers ──────────────────────────────────────────────────────
 
+function buildSourcesBlock(sources) {
+  if (!sources || !sources.length) return null;
+  const details = document.createElement("details");
+  details.className = "msg-sources";
+
+  const summary = document.createElement("summary");
+  summary.className = "sources-toggle";
+  summary.textContent = sources.length === 1 ? "1 fonte" : `${sources.length} fontes`;
+  details.appendChild(summary);
+
+  const list = document.createElement("div");
+  list.className = "sources-tags";
+  sources.forEach(s => {
+    const tag = document.createElement("span");
+    tag.className = "source-tag";
+    if (s.includes("ticket_")) {
+      const link = document.createElement("a");
+      link.href = `https://kundencloud.com.br:3825/atendimento?id=${s.replace("ticket_", "")}&callType=customer`;
+      link.target = "_blank";
+      link.className = "source-tag-link";
+      link.textContent = s;
+      tag.appendChild(link);
+    } else {
+      tag.textContent = s;
+    }
+    list.appendChild(tag);
+  });
+  details.appendChild(list);
+  return details;
+}
+
 function appendMessage(role, text, sources, images) {
   welcome.style.display = "none";
 
@@ -142,29 +173,8 @@ function appendMessage(role, text, sources, images) {
     bubble.appendChild(textSpan);
   }
 
-  if (sources && sources.length) {
-    const bar = document.createElement("div");
-    bar.className = "msg-sources";
-    sources.forEach(s => {
-      const tag = document.createElement("span");
-      tag.className = "source-tag";
-
-      if (s.includes("ticket_")) {
-        const link = document.createElement("a");
-        const ticketNumber = s.replace("ticket_", "");
-        link.href = `https://kundencloud.com.br:3825/atendimento?id=${ticketNumber}&callType=customer`;
-        link.target = "_blank";
-        link.className = "source-tag-link";
-        link.textContent = s;
-        tag.appendChild(link);
-      } else {
-        tag.textContent = s;
-      }
-
-      bar.appendChild(tag);
-    });
-    bubble.appendChild(bar);
-  }
+  const sourcesBlock = buildSourcesBlock(sources);
+  if (sourcesBlock) bubble.appendChild(sourcesBlock);
 
   const meta = document.createElement("div");
   meta.className = "msg-meta";
@@ -272,26 +282,8 @@ async function sendMessage() {
       ],
       throwOnError: false,
     });
-    if (sources && sources.length) {
-      const bar = document.createElement("div");
-      bar.className = "msg-sources";
-      sources.forEach(s => {
-        const tag = document.createElement("span");
-        tag.className = "source-tag";
-        if (s.includes("ticket_")) {
-          const link = document.createElement("a");
-          link.href = `https://kundencloud.com.br:3825/atendimento?id=${s.replace("ticket_", "")}&callType=customer`;
-          link.target = "_blank";
-          link.className = "source-tag-link";
-          link.textContent = s;
-          tag.appendChild(link);
-        } else {
-          tag.textContent = s;
-        }
-        bar.appendChild(tag);
-      });
-      assistantBubble.appendChild(bar);
-    }
+    const sourcesBlock = buildSourcesBlock(sources);
+    if (sourcesBlock) assistantBubble.appendChild(sourcesBlock);
   }
 
   try {
