@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ChatKND — Documents</title>
+  <title>ChatKND — Documentos</title>
   <link rel="stylesheet" href="/viewer.css" />
 </head>
 <body>
@@ -11,17 +11,19 @@
 <header>
   <h1>ChatKND</h1>
   <nav>
-    <a href="/" class="nav-link active">Document Viewer</a>
+    <a href="/" class="nav-link active">Documentos</a>
     <a href="/chat" class="nav-link">Chat</a>
   </nav>
-  <span id="col-badge">collection: —</span>
-  <button class="logout-btn" onclick="logout()" style="margin-left:auto">Sair</button>
+  <div class="header-user">
+    <span id="header-user-name"></span>
+    <button class="logout-btn" onclick="logout()">Sair</button>
+  </div>
 </header>
 
 <div class="stats-bar">
   <div class="stat"><span class="stat-label">Total Chunks</span><span class="stat-value" id="s-chunks">—</span></div>
-  <div class="stat"><span class="stat-label">Source Files</span><span class="stat-value" id="s-sources">—</span></div>
-  <div class="stat"><span class="stat-label">Collections</span><span class="stat-value" id="s-cols">—</span></div>
+  <div class="stat"><span class="stat-label">Total Arquivos</span><span class="stat-value" id="s-sources">—</span></div>
+  <div class="stat"><span class="stat-label">Coleção de Dados</span><span class="stat-value" id="s-cols">—</span></div>
   <button class="clear-btn" onclick="clearAllChunks()" title="Delete every chunk from the collection (keeps the collection itself)">Clear All Chunks</button>
   <button class="reset-btn" onclick="resetCollection()" title="Drop the collection and recreate it empty (required after changing embedding model)">Reset Collection</button>
 </div>
@@ -29,35 +31,35 @@
 <div class="workspace">
   <aside>
     <div class="upload-section">
-      <span class="upload-title">Ingest file</span>
+      <span class="upload-title">Processar Documento</span>
       <div class="upload-row">
         <label class="file-pick-label">
           <input type="file" id="file-input" accept=".pdf,.docx,.txt,.md" multiple onchange="onFilePick(this)" />
-          <span class="file-pick-name" id="file-name">Choose file(s)…</span>
+          <span class="file-pick-name" id="file-name">Escolher Arquivo(s)…</span>
         </label>
-        <button class="ingest-btn" id="ingest-btn" onclick="ingestFile()">Ingest</button>
+        <button class="ingest-btn" id="ingest-btn" onclick="ingestFile()">Processar</button>
       </div>
       <div class="ingest-status" id="ingest-status"></div>
     </div>
-    <div class="aside-head">Sources</div>
+    <div class="aside-head">Arquivos</div>
     <div class="source-filter">
-      <input type="text" id="source-filter-input" placeholder="Filter sources…" oninput="filterSources()" />
+      <input type="text" id="source-filter-input" placeholder="Filtrar Arquivos…" oninput="filterSources()" />
     </div>
     <div class="source-list" id="source-list">
-      <div class="empty">Loading…</div>
+      <div class="empty">Carregando…</div>
     </div>
   </aside>
 
   <main>
     <div class="toolbar">
-      <input type="text" id="search-input" placeholder="Search or enter a phrase…" />
-      <button onclick="doSearch()">Text</button>
-      <button class="semantic" id="semantic-btn" onclick="doSemanticSearch()">Semantic</button>
-      <button class="secondary" onclick="clearSearch()">All</button>
+      <input type="text" id="search-input" placeholder="Busque por palavra ou frase…" />
+      <button onclick="doSearch()" title="Executa uma pesquisa pelo termo exato.">Busca por Texto</button>
+      <button class="semantic" id="semantic-btn" onclick="doSemanticSearch()" title="Executa uma busca por proximidade de texto, exatamente como o Chat executa para encontrar dados parecidos.">Busca Semântica</button>
+      <button class="secondary" onclick="clearSearch()">Todos</button>
     </div>
-    <div class="mode-label" id="mode-label">Showing all chunks</div>
+    <div class="mode-label" id="mode-label">Mostrando todos os chunks</div>
     <div class="chunk-list" id="chunk-list">
-      <div class="empty">Select a source or search to explore chunks.</div>
+      <div class="empty">Selecione um arquivo ou faça uma busca</div>
     </div>
     <div class="pagination" id="pagination" style="display:none"></div>
   </main>

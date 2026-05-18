@@ -301,7 +301,7 @@ async function sendMessage() {
     if (!res.ok) {
       typingRow.remove();
       const err = await res.json().catch(() => ({}));
-      appendError(err.error || `Server error (${res.status})`);
+      appendError(err.error || `Erro interno (${res.status})`);
       history.pop();
     } else {
       const reader  = res.body.getReader();
@@ -346,13 +346,13 @@ async function sendMessage() {
 
       if (!hadError && !assistantRow) {
         typingRow.remove();
-        appendError("No response received.");
+        appendError("Sem resposta.");
         history.pop();
       }
     }
   } catch (e) {
     typingRow.remove();
-    appendError("Could not reach the chat backend. Err: " + e);
+    appendError("Não foi possível estabelecer conexão com o sistema de respostas. Erro: " + e);
     history.pop();
   }
 
@@ -368,9 +368,9 @@ function formatDate(isoStr) {
   const d    = new Date(isoStr);
   const now  = new Date();
   const diffDays = Math.floor((now - d) / 86400000);
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7)  return d.toLocaleDateString("pt-BR", { weekday: "short" });
+  if (diffDays === 0) return "Hoje";
+  if (diffDays === 1) return "Ontem";
+  if (diffDays < 7)  return d.toLocaleDateString("pt-BR", { weekday: "long" });
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
@@ -389,7 +389,7 @@ function renderHistoryList(conversations) {
   if (!conversations.length) {
     const empty = document.createElement("p");
     empty.style.cssText = "color:rgba(255,255,255,.3);font-size:.75rem;padding:12px 8px;";
-    empty.textContent = "No conversations yet.";
+    empty.textContent = "Você não conversou comigo ainda :(";
     list.appendChild(empty);
     return;
   }
@@ -420,7 +420,7 @@ function renderHistoryList(conversations) {
       const del = document.createElement("button");
       del.className = "history-delete";
       del.textContent = "×";
-      del.title = "Delete conversation";
+      del.title = "Deletar conversa";
       del.onclick = async e => {
         e.stopPropagation();
         await deleteConversation(conv.id);
@@ -462,7 +462,7 @@ async function loadConversation(id) {
 
     input.focus();
   } catch (e) {
-    console.error("Failed to load conversation:", e);
+    console.error("Falha ao carregar a conversa:", e);
   }
 }
 
@@ -484,7 +484,7 @@ async function deleteConversation(id) {
     if (id === currentConversationId) newConversation();
     await loadHistory();
   } catch (e) {
-    console.error("Failed to delete conversation:", e);
+    console.error("Falha ao deletar a conversa:", e);
   }
 }
 

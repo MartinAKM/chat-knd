@@ -16,11 +16,26 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
 .nav-link:hover { background: rgba(255,255,255,.1); color: #fff; }
 .nav-link.active { background: rgba(255,255,255,.15); color: #fff; }
 
+.header-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#header-user-name {
+  font-size: .8rem;
+  color: rgba(255,255,255,.7);
+}
 .logout-btn {
-  padding: 5px 12px; background: rgba(255,255,255,.1);
-  border: 1px solid rgba(255,255,255,.22); border-radius: 6px;
-  color: #fff; font-size: .78rem; cursor: pointer;
-  transition: background .15s; font-family: inherit;
+  padding: 5px 12px;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 6px;
+  color: #fff;
+  font-size: .78rem;
+  cursor: pointer;
+  transition: background .15s;
+  font-family: inherit;
 }
 .logout-btn:hover { background: rgba(255,255,255,.2); }
 

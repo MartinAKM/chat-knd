@@ -1,9 +1,5 @@
 const PAGE_SIZE = 30;
 
-async function logout() {
-  await fetch("/api/auth/logout", { method: "POST" });
-  window.location.href = "/login";
-}
 let state = { mode: 'all', source: null, query: '', page: 1, total: 0 };
 
 async function api(path) {
@@ -19,21 +15,20 @@ async function loadStats() {
   if (col) {
     document.getElementById('s-chunks').textContent = col.count.toLocaleString();
     document.getElementById('s-sources').textContent = col.sources.length;
-    document.getElementById('col-badge').textContent = 'collection: ' + col.name;
     renderSources(col.sources, col.source_counts);
   }
 }
 
 function renderSources(sources, counts) {
   const el = document.getElementById('source-list');
-  if (!sources.length) { el.innerHTML = '<div class="empty">No data ingested yet.</div>'; return; }
+  if (!sources.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   el.innerHTML = sources.map(s => {
     const safe = s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     return `
     <div class="source-item" data-src="${escHtml(s)}" onclick="selectSource('${safe}')">
       <div class="source-name">${escHtml(s)}</div>
       <div class="source-count">${(counts[s]||0)} chunk(s)</div>
-      <button class="del-btn" title="Delete all chunks for this file"
+      <button class="del-btn" title="Deletar arquivo."
         onclick="deleteSource(event,'${safe}')">&#x2715;</button>
     </div>`;
   }).join('');
@@ -141,33 +136,33 @@ async function clearSearch() {
 async function loadChunks() {
   const list = document.getElementById('chunk-list');
   const semBtn = document.getElementById('semantic-btn');
-  list.innerHTML = '<div class="empty">Loading…</div>';
+  list.innerHTML = '<div class="empty">Carregando…</div>';
   document.getElementById('pagination').style.display = 'none';
 
   let data;
   if (state.mode === 'semantic') {
     semBtn.disabled = true;
-    semBtn.textContent = 'Searching…';
+    semBtn.textContent = 'Procurando…';
     try {
       data = await api(`/api/semantic-search?q=${encodeURIComponent(state.query)}`);
     } finally {
       semBtn.disabled = false;
-      semBtn.textContent = 'Semantic';
+      semBtn.textContent = 'Busca Semântica';
     }
     if (data.error) {
       list.innerHTML = `<div class="empty">${escHtml(data.error)}</div>`;
-      document.getElementById('mode-label').textContent = 'Semantic search failed';
+      document.getElementById('mode-label').textContent = 'Busca semântica falhou';
       return;
     }
     const results = data.results || [];
     renderChunks(results);
     document.getElementById('mode-label').textContent =
-      `Semantic: "${state.query}" — ${results.length} chunk(s) above 75% proximity`;
+      `Busca Semântica: "${state.query}" — ${results.length} chunk(s) acima de 50% de proximidade`;
   } else if (state.mode === 'search') {
     data = await api(`/api/search?q=${encodeURIComponent(state.query)}`);
     renderChunks(data.results || [], state.query);
     document.getElementById('mode-label').textContent =
-      `Text search: "${state.query}" — ${(data.results||[]).length} chunk(s)`;
+      `Busca por Texto: "${state.query}" — ${(data.results||[]).length} chunk(s)`;
   } else {
     let url = `/api/documents?page=${state.page}&page_size=${PAGE_SIZE}`;
     if (state.source) url += `&source=${encodeURIComponent(state.source)}`;
@@ -175,8 +170,8 @@ async function loadChunks() {
     state.total = data.total || 0;
     renderChunks(data.items || []);
     document.getElementById('mode-label').textContent = state.source
-      ? `Chunks from "${state.source}" — ${state.total} total`
-      : `All chunks — ${state.total} total`;
+      ? `Chunks do Arquivo ${state.source}`
+      : `Todos os chunks`;
     renderPagination();
   }
 }
@@ -200,7 +195,7 @@ function proxClass(pct) {
 function renderMeta(meta) {
   if (!meta || !Object.keys(meta).length) return '';
   const tags = Object.entries(meta)
-    .map(([k, v]) => `<span class="meta-tag"><b>${escHtml(k)}:</b> ${escHtml(String(v))}</span>`)
+    .map(([k, v]) => `<span class="meta-tag">${escHtml(String(v))}</span>`)
     .join('');
   return `<div class="chunk-info">${tags}</div>`;
 }
@@ -208,7 +203,7 @@ function renderMeta(meta) {
 function renderChunks(items, query = '') {
   const list = document.getElementById('chunk-list');
   if (!items.length) {
-    list.innerHTML = '<div class="empty">No chunks found.</div>';
+    list.innerHTML = '<div class="empty">Não foram encontrados chunks.</div>';
     return;
   }
   list.innerHTML = items.map(item => `
@@ -253,7 +248,7 @@ document.getElementById('search-input').addEventListener('keydown', e => {
 function onFilePick(input) {
   const n = input.files.length;
   document.getElementById('file-name').textContent =
-    n === 0 ? 'Choose file(s)…' : n === 1 ? input.files[0].name : `${n} files selected`;
+    n === 0 ? 'Escolher Arquivo(s)…' : n === 1 ? input.files[0].name : `${n} files selected`;
   setIngestStatus('');
 }
 
@@ -265,7 +260,7 @@ function setIngestStatus(msg, cls) {
 
 async function ingestFile() {
   const input = document.getElementById('file-input');
-  if (!input.files.length) { setIngestStatus('Select a file first.', 'err'); return; }
+  if (!input.files.length) { setIngestStatus('Selecione um arquivo primeiro.', 'err'); return; }
   const files = Array.from(input.files);
   const btn = document.getElementById('ingest-btn');
   btn.disabled = true;
@@ -274,7 +269,7 @@ async function ingestFile() {
   const errors = [];
 
   for (let i = 0; i < files.length; i++) {
-    setIngestStatus(`Ingesting ${i + 1}/${files.length}: ${files[i].name}…`);
+    setIngestStatus(`Processando ${i + 1}/${files.length}: ${files[i].name}…`);
     const form = new FormData();
     form.append('file', files[i]);
     try {
@@ -283,7 +278,7 @@ async function ingestFile() {
       if (data.ok) {
         totalChunks += data.chunks;
       } else {
-        errors.push(`${files[i].name}: ${data.error || 'unknown error'}`);
+        errors.push(`${files[i].name}: ${data.error || 'erro desconhecido'}`);
       }
     } catch (e) {
       errors.push(`${files[i].name}: ${e.message}`);
@@ -291,15 +286,15 @@ async function ingestFile() {
   }
 
   input.value = '';
-  document.getElementById('file-name').textContent = 'Choose file(s)…';
+  document.getElementById('file-name').textContent = 'Escolher Arquivo(s)…';
   await loadStats();
 
   if (errors.length === 0) {
-    setIngestStatus(`Done: ${files.length} file(s), ${totalChunks} chunks stored.`, 'ok');
+    setIngestStatus(`Concluído: ${files.length} arquivos(s), ${totalChunks} chunks armazenados.`, 'ok');
   } else if (errors.length < files.length) {
-    setIngestStatus(`Partial: ${totalChunks} chunks stored. Errors: ${errors.join(' | ')}`, 'err');
+    setIngestStatus(`Concluído com erros: ${totalChunks} chunks armazenados. Erros: ${errors.join(' | ')}`, 'err');
   } else {
-    setIngestStatus('All failed: ' + errors.join(' | '), 'err');
+    setIngestStatus('Falhou: ' + errors.join(' | '), 'err');
   }
 
   btn.disabled = false;
@@ -393,7 +388,7 @@ async function resetCollection() {
       await loadStats();
     } else {
       Swal.fire({
-        text: data.error || 'unknown', 
+        text: data.error || 'desconhecido', 
         icon: 'error',
         confirmButtonColor: '#1e3a5f',
         customClass: {
@@ -413,4 +408,26 @@ async function resetCollection() {
   }
 }
 
+// ── Auth ───────────────────────────────────────────────────────────────────
+
+async function initUser() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (res.status === 401) { window.location.href = "/login"; return; }
+    const user = await res.json();
+    document.getElementById("header-user-name").textContent = user.name;
+    if (user.role === "admin") {
+      document.getElementById("nav-viewer").style.display = "";
+    }
+  } catch (_) {}
+}
+
+async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+initUser();
 loadStats();
