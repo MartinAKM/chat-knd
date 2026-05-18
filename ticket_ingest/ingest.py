@@ -23,6 +23,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+from tqdm import tqdm
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -33,8 +36,8 @@ _ROOT = Path(__file__).parent.parent
 load_dotenv(_ROOT / ".env")
 sys.path.insert(0, str(_ROOT / "doc_reader"))
 
-from chroma_store import delete_chunks, get_collection, upsert_chunks  # noqa: E402
-from cleaner import strip_greetings                                     # noqa: E402
+from chroma_store import get_collection, upsert_many  # noqa: E402
+from cleaner import strip_greetings                    # noqa: E402
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +54,7 @@ SUMMARIZE_MODEL    = os.getenv("SUMMARIZE_MODEL") or os.getenv("CHAT_MODEL", "ge
 MAX_CONV_CHARS      = 6000   # truncate conversation sent to LLM (keeps prompt manageable)
 LLM_TIMEOUT         = 180    # seconds — large model on first ticket can be slow
 IMAGE_FETCH_TIMEOUT = 15     # seconds per image download
+_COMMIT_EVERY       = 10     # commit pending summaries to ChromaDB every N tickets processed
 
 _IMAGE_HOST = "https://kundencloud.com.br:3826"
 _IMG_SRC_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
@@ -75,9 +79,23 @@ _QUERY = """
     WHERE A.ID = M.ATENDIMENTO_ID
       AND C.ID = A.CLIENTE_ID
       AND P.ID = C.PESSOA_ID
-      AND A.ID = 260102008
-      --AND A.DATA_INICIO BETWEEN TO_DATE('01/01/2026', 'DD/MM/RRRR') AND TO_DATE('31/01/2026', 'DD/MM/RRRR')
+      --AND A.ID = 260102008
+      AND A.DATA_INICIO BETWEEN TO_DATE('01/01/2025', 'DD/MM/RRRR') AND TO_DATE('31/01/2026', 'DD/MM/RRRR')
     ORDER BY M.ATENDIMENTO_ID, M.DATA_HORA
+"""
+
+# Keep WHERE clause identical to _QUERY (minus ORDER BY) so the count is accurate.
+_COUNT_QUERY = """
+    SELECT COUNT(DISTINCT M.ATENDIMENTO_ID)
+    FROM PESSOA_CRM P,
+         CLIENTE_CRM C,
+         ATENDIMENTO_CRM A,
+         MSG_ATENDIMENTO_CRM M
+    WHERE A.ID = M.ATENDIMENTO_ID
+      AND C.ID = A.CLIENTE_ID
+      AND P.ID = C.PESSOA_ID
+      --AND A.ID = 260102008
+      AND A.DATA_INICIO BETWEEN TO_DATE('01/01/2025', 'DD/MM/RRRR') AND TO_DATE('31/01/2026', 'DD/MM/RRRR')
 """
 
 # ── HTML stripping ─────────────────────────────────────────────────────────
@@ -153,15 +171,20 @@ def _extract_image_urls(texto: str) -> list[str]:
 
 
 def _fetch_images(urls: list[str]) -> list[str]:
-    """Download images and return them as base64 strings; silently skip failures."""
-    encoded = []
-    for url in urls:
+    """Download images in parallel and return them as base64 strings; silently skip failures."""
+    if not urls:
+        return []
+
+    def _download(url: str) -> str | None:
         try:
             with urllib.request.urlopen(url, timeout=IMAGE_FETCH_TIMEOUT) as r:
-                encoded.append(base64.b64encode(r.read()).decode())
+                return base64.b64encode(r.read()).decode()
         except Exception:
-            pass
-    return encoded
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(len(urls), 8)) as executor:
+        results = list(executor.map(_download, urls))
+    return [r for r in results if r is not None]
 
 
 # ── Conversation builder ───────────────────────────────────────────────────
@@ -327,43 +350,75 @@ def ingest_tickets(
 
     col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
 
-    if reset:
-        print("Wiping existing ticket chunks…")
-        total = col.count()
-        if total:
-            ticket_sources: set[str] = set()
-            offset = 0
-            while offset < total:
-                data = col.get(include=["metadatas"], limit=500, offset=offset)
-                for meta in data["metadatas"]:
-                    src = meta.get("source", "")
-                    if src.startswith("ticket_"):
-                        ticket_sources.add(src)
-                offset += 500
-            for src in ticket_sources:
-                delete_chunks(col, src)
-            print(f"  Removed chunks for {len(ticket_sources)} tickets.")
+    # Load all existing ticket IDs into a set for O(1) duplicate checks.
+    # This single pass replaces a per-ticket col.get() that would scan
+    # the full collection on every call — critical at thousands of tickets.
+    print("Loading existing ticket IDs from ChromaDB…", end=" ", flush=True)
+    known_ids: set[str] = set()
+    offset = 0
+    while True:
+        data = col.get(include=["metadatas"], limit=1000, offset=offset)
+        if not data["ids"]:
+            break
+        for meta in data["metadatas"]:
+            src = meta.get("source", "")
+            if src.startswith("ticket_"):
+                known_ids.add(src)
+        offset += len(data["ids"])
+        if len(data["ids"]) < 1000:
+            break
+    print(f"{len(known_ids)} existing tickets found.")
+
+    if reset and known_ids:
+        print(f"Wiping {len(known_ids)} existing ticket chunks…", end=" ", flush=True)
+        src_list = list(known_ids)
+        # Delete in batches of 500 using $in to avoid one delete call per source.
+        for i in range(0, len(src_list), 500):
+            col.delete(where={"source": {"$in": src_list[i : i + 500]}})
+        known_ids.clear()
+        print("done.")
 
     conn    = _connect()
     cursor  = conn.cursor()
-    cursor.arraysize = 200
+    cursor.arraysize = 500   # fetch 500 rows per network round-trip (was 200)
+
+    count_cur = conn.cursor()
+    count_cur.execute(_COUNT_QUERY)
+    total_tickets = count_cur.fetchone()[0]
+    count_cur.close()
+    if limit:
+        total_tickets = min(total_tickets, limit)
+
     cursor.execute(_QUERY)
 
     current_id    = None
     messages: list[dict] = []
     tickets_done  = 0
     skipped       = 0
+    already_done  = 0
+    pending: list[tuple[str, str]] = []  # (source, summary) waiting for batch upsert
 
-    def _flush(atendimento_id, msgs: list[dict]) -> bool:
+    def _commit_batch() -> None:
+        if pending:
+            upsert_many(col, pending)
+            pending.clear()
+
+    def _flush(atendimento_id, msgs: list[dict]) -> str | bool | None:
+        """
+        Returns str   = new summary ready to upsert (caller handles batching),
+                False = skipped (empty content),
+                None  = already in ChromaDB, not reprocessed.
+        """
         source = f"ticket_{atendimento_id}"
+        if source in known_ids:
+            return None
 
-        # Extract image URLs from raw HTML before any stripping occurs
         images: list[str] = []
         if use_llm:
             all_urls: list[str] = []
             for msg in msgs:
                 all_urls.extend(_extract_image_urls(msg.get("texto") or ""))
-            images = _fetch_images(all_urls) if all_urls else []
+            images = _fetch_images(all_urls)  # parallel download
 
         conversation = _build_conversation(msgs)
         if not conversation.strip():
@@ -382,11 +437,21 @@ def ingest_tickets(
         if not summary.strip():
             return False
 
-        delete_chunks(col, source)
-        upsert_chunks(col, source, [summary])   # one chunk per ticket
-        return True
+        return summary
 
     print(f"Streaming tickets from Oracle  (LLM summarisation: {'on' if use_llm else 'off'})…\n")
+
+    bar = tqdm(
+        total=total_tickets,
+        unit="ticket",
+        dynamic_ncols=True,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}] {postfix}",
+    )
+
+    def _update_bar(atendimento_id) -> None:
+        bar.set_description(f"#{atendimento_id}")
+        bar.set_postfix(new=tickets_done, done=already_done, skip=skipped)
+        bar.update(1)
 
     for row in cursor:
         atendimento_id, data_hora, usuario_id, texto, cliente, pedido_servico = row
@@ -395,14 +460,25 @@ def ingest_tickets(
             current_id = atendimento_id
 
         if atendimento_id != current_id:
-            ok = _flush(current_id, messages)
-            if ok:
-                tickets_done += 1
-            else:
+            bar.set_description(f"#{current_id}")
+            result = _flush(current_id, messages)
+            if result is None:
+                already_done += 1
+            elif result is False:
                 skipped += 1
-            if (tickets_done + skipped) % 10 == 0:
-                print(f"  {tickets_done} summarised  |  {skipped} skipped (empty)…")
-            if limit and tickets_done >= limit:
+            else:
+                source = f"ticket_{current_id}"
+                pending.append((source, result))
+                known_ids.add(source)
+                tickets_done += 1
+
+            total_processed = tickets_done + already_done + skipped
+            if total_processed % _COMMIT_EVERY == 0:
+                _commit_batch()
+
+            _update_bar(current_id)
+
+            if limit and total_processed >= limit:
                 current_id = None
                 messages   = []
                 break
@@ -410,24 +486,34 @@ def ingest_tickets(
             messages   = []
 
         messages.append({
-            "data_hora":     str(data_hora),
-            "usuario_id":    str(usuario_id or ""),
-            "texto":         texto,
-            "cliente":       str(cliente or ""),
+            "data_hora":      str(data_hora),
+            "usuario_id":     str(usuario_id or ""),
+            "texto":          texto,
+            "cliente":        str(cliente or ""),
             "pedido_servico": str(pedido_servico or ""),
         })
 
     if current_id is not None and messages:
-        ok = _flush(current_id, messages)
-        if ok:
-            tickets_done += 1
-        else:
+        bar.set_description(f"#{current_id}")
+        result = _flush(current_id, messages)
+        if result is None:
+            already_done += 1
+        elif result is False:
             skipped += 1
+        else:
+            source = f"ticket_{current_id}"
+            pending.append((source, result))
+            known_ids.add(source)
+            tickets_done += 1
+        _update_bar(current_id)
+
+    bar.close()
+    _commit_batch()  # flush any remaining summaries
 
     cursor.close()
     conn.close()
 
-    print(f"\nDone.  {tickets_done} tickets summarised → {tickets_done} chunks  |  {skipped} skipped.")
+    print(f"\nDone.  {tickets_done} tickets summarised → {tickets_done} chunks  |  {already_done} already done  |  {skipped} skipped (empty).")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────

@@ -40,6 +40,16 @@ def upsert_chunks(collection, doc_id: str, chunks: list[str]) -> None:
     collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
 
 
+def upsert_many(collection, items: list[tuple[str, str]]) -> None:
+    """Upsert multiple single-chunk items in one batched call. items = [(source, text), ...]"""
+    if not items:
+        return
+    ids       = [f"{src}__0" for src, _ in items]
+    documents = [text for _, text in items]
+    metadatas = [{"source": src} for src, _ in items]
+    collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+
 def delete_chunks(collection, doc_id: str) -> int:
     """Delete all chunks belonging to doc_id. Returns the number of chunks removed."""
     existing = collection.get(where={"source": doc_id}, include=[])
