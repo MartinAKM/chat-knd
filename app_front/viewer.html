@@ -23,9 +23,14 @@
 <div class="stats-bar">
   <div class="stat"><span class="stat-label">Total Chunks</span><span class="stat-value" id="s-chunks">—</span></div>
   <div class="stat"><span class="stat-label">Total Arquivos</span><span class="stat-value" id="s-sources">—</span></div>
-  <div class="stat"><span class="stat-label">Coleção de Dados</span><span class="stat-value" id="s-cols">—</span></div>
-  <button class="clear-btn" onclick="clearAllChunks()" title="Delete every chunk from the collection (keeps the collection itself)">Clear All Chunks</button>
-  <button class="reset-btn" onclick="resetCollection()" title="Drop the collection and recreate it empty (required after changing embedding model)">Reset Collection</button>
+  <div class="stat collection" onclick="openModalCollection()"><span class="stat-label">Coleção de Dados</span><span class="stat-value" id="s-cols">—</span></div>
+</div>
+
+<div class="modal-backdrop" onclick="closeCollectionActions(event)">
+  <div class="modal-collection">
+    <div class="collection-title"> <h1> Coleções </h1></div>
+    <div id="collections-list"></div>
+  </div>
 </div>
 
 <div class="workspace">
