@@ -17,20 +17,22 @@ sys.path.insert(0, str(_ROOT))
 
 from chroma_store import get_collection          # noqa: E402
 from reranker import rerank                      # noqa: E402
+import bm25_store                                # noqa: E402
 from chat_api.history import (                   # noqa: E402
     append_exchange, create_conversation,
 )
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-CHAT_MODEL      = os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
-CHROMA_PATH     = os.getenv("CHROMA_PATH", "chroma_data")
-EMBED_MODEL     = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
+OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+CHAT_MODEL         = os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
+CHROMA_PATH        = os.getenv("CHROMA_PATH", "chroma_data")
+EMBED_MODEL        = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+DOCS_COLLECTION    = os.getenv("CHROMA_COLLECTION", "documents")
+TICKETS_COLLECTION = os.getenv("TICKETS_CHROMA_COLLECTION", "tickets")
 
-_CONTEXT_RESULTS       = 5   # max chunks from semantic search
-_KEYWORD_RESULTS       = 5   # max extra chunks from keyword search
-_DATE_RESULTS          = 10  # max chunks from date-filtered search
-_DOC_RESULTS           = 3   # document chunks always added to pool before ticket search
+_DOC_RESULTS           = 3   # max chunks from documents collection
+_TICKET_RESULTS        = 5   # max chunks from tickets collection (dense + BM25)
+_KEYWORD_RESULTS       = 5   # max extra ticket chunks from keyword exact-match
+_DATE_RESULTS          = 10  # max extra ticket chunks from date-filtered search
 _MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
 _MIN_DISPLAY_PROXIMITY = 65.0  # minimum score to surface a source in the UI
 _MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
@@ -142,56 +144,27 @@ def _load_keywords() -> list[str]:
 
 _CONFIGURED_KEYWORDS: list[str] = _load_keywords()
 
-# Cache of client names extracted from ChromaDB ticket chunks.
+# Cache of client names extracted from the tickets collection.
 # Populated on first query; lives for the duration of the server process.
 _clients_cache: list[str] | None = None
 
-# Cache of document source names (everything whose source does NOT start with "ticket_").
-_doc_sources_cache: list[str] | None = None
-
-
-def _get_doc_sources() -> list[str]:
-    """Return all unique non-ticket source names in the collection."""
-    global _doc_sources_cache
-    if _doc_sources_cache is not None:
-        return _doc_sources_cache
-    try:
-        col    = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
-        total  = col.count()
-        sources: set[str] = set()
-        offset = 0
-        while offset < total:
-            data = col.get(include=["metadatas"], limit=1000, offset=offset)
-            for meta in data["metadatas"]:
-                src = meta.get("source", "")
-                if src and not src.startswith("ticket_"):
-                    sources.add(src)
-            offset += len(data["ids"])
-            if len(data["ids"]) < 1000:
-                break
-        _doc_sources_cache = list(sources)
-    except Exception:
-        _doc_sources_cache = []
-    return _doc_sources_cache
-
 
 def _get_known_clients() -> list[str]:
-    """Return all unique client names found in ingested ticket chunks."""
+    """Return all unique client names found in the tickets collection."""
     global _clients_cache
     if _clients_cache is not None:
         return _clients_cache
     try:
-        col   = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
-        total = col.count()
+        col    = get_collection(CHROMA_PATH, EMBED_MODEL, TICKETS_COLLECTION)
+        total  = col.count()
         clients: set[str] = set()
         offset = 0
         while offset < total:
-            data = col.get(include=["documents", "metadatas"], limit=500, offset=offset)
-            for doc, meta in zip(data["documents"], data["metadatas"]):
-                if meta.get("source", "").startswith("ticket_"):
-                    m = _CLIENT_LINE_RE.search(doc)
-                    if m:
-                        clients.add(m.group(1).strip())
+            data = col.get(include=["documents"], limit=500, offset=offset)
+            for doc in data["documents"]:
+                m = _CLIENT_LINE_RE.search(doc)
+                if m:
+                    clients.add(m.group(1).strip())
             offset += 500
         _clients_cache = list(clients)
     except Exception:
@@ -288,100 +261,124 @@ def _ensure_running() -> None:
 
 def _retrieve_context(question: str) -> tuple[str, list[str]]:
     """
-    Hybrid retrieval: semantic search + exact keyword match.
+    Hybrid retrieval over two dedicated collections (documents + tickets).
 
-    Semantic search finds thematically related chunks.
-    Keyword search guarantees that chunks containing ERP program codes or
-    configured domain terms are always included, regardless of similarity score.
+    For each collection:
+      dense semantic search  ─┐
+                               ├─ RRF fusion → top-N candidates
+      BM25 sparse search     ─┘
+
+    Ticket collection also runs exact keyword and date-prefix matches.
+    All candidates are merged and reranked by a cross-encoder.
 
     Returns (context_block, unique_source_names).
     """
     try:
-        col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
-        count = col.count()
-        if count == 0:
+        docs_col    = get_collection(CHROMA_PATH, EMBED_MODEL, DOCS_COLLECTION)
+        tickets_col = get_collection(CHROMA_PATH, EMBED_MODEL, TICKETS_COLLECTION)
+        docs_count    = docs_col.count()
+        tickets_count = tickets_col.count()
+
+        if docs_count + tickets_count == 0:
             return "", []
 
-        # Results keyed by chunk id to deduplicate across both searches.
-        # Value: (document_text, metadata, proximity_pct)
+        # Results keyed by chunk id.  Value: (text, metadata, proximity_pct).
+        # proximity_pct is used only for the source-display threshold; the
+        # cross-encoder handles the final relevance ordering.
         seen: dict[str, tuple[str, dict, float]] = {}
 
-        # 0. Document-first pass — guarantees document chunks reach the reranker.
-        #    Without this, a large ticket corpus buries documents in semantic search.
-        #    Documents are identified by source name not starting with "ticket_".
-        doc_sources = _get_doc_sources()
-        if doc_sources:
-            try:
-                doc_res = col.query(
-                    query_texts=[question],
-                    n_results=min(_DOC_RESULTS * 2, count),
-                    where={"source": {"$in": doc_sources}},
-                    include=["documents", "metadatas", "distances"],
-                )
-                for doc_id, doc, meta, dist in zip(
-                    doc_res["ids"][0], doc_res["documents"][0],
-                    doc_res["metadatas"][0], doc_res["distances"][0],
-                ):
-                    proximity = max(0.0, (1.0 - dist / 2.0) * 100)
-                    seen[doc_id] = (doc, meta, proximity)  # no threshold — reranker decides
-            except Exception:
-                pass
+        # ── 1. Documents: dense + BM25 + RRF ──────────────────────────────
+        if docs_count > 0:
+            bm25_store.ensure_built(DOCS_COLLECTION, CHROMA_PATH, EMBED_MODEL)
 
-        # 1. Semantic search — fetch 3× to give the reranker wider candidate pool
-        res = col.query(
-            query_texts=[question],
-            n_results=min(_CONTEXT_RESULTS * 3, count),
-            include=["documents", "metadatas", "distances"],
-        )
-        for doc_id, doc, meta, dist in zip(
-            res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0]
-        ):
-            proximity = max(0.0, (1.0 - dist / 2.0) * 100)
-            if proximity >= _MIN_PROXIMITY:
-                seen[doc_id] = (doc, meta, proximity)
+            d_res = docs_col.query(
+                query_texts=[question],
+                n_results=min(_DOC_RESULTS * 4, docs_count),
+                include=["documents", "metadatas", "distances"],
+            )
+            doc_dense = list(zip(
+                d_res["ids"][0], d_res["documents"][0],
+                d_res["metadatas"][0], d_res["distances"][0],
+            ))
+            id_to_prox = {
+                cid: max(0.0, (1.0 - dist / 2.0) * 100)
+                for cid, _, _, dist in doc_dense
+            }
 
-        # 2. Keyword exact-match search for detected ERP codes / configured terms
-        keywords = _extract_keywords(question)
-        for term in keywords:
-            try:
-                kw = col.get(
-                    where_document={"$contains": term},
-                    include=["documents", "metadatas"],
-                    limit=_KEYWORD_RESULTS,
-                )
-            except Exception:
-                continue
-            for doc_id, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
-                if doc_id not in seen:
-                    seen[doc_id] = (doc, meta, 100.0)
+            doc_sparse = bm25_store.search(question, DOCS_COLLECTION, _DOC_RESULTS * 4)
+            doc_fused  = bm25_store.rrf_fuse(doc_dense, doc_sparse)
 
-        # 3. Date-filtered search — fetches ticket chunks from the detected period
-        date_prefix = _extract_date_prefix(question)
-        if date_prefix:
-            try:
-                kw = col.get(
-                    where_document={"$contains": "Atendimento: " + date_prefix},
-                    include=["documents", "metadatas"],
-                    limit=_DATE_RESULTS,
-                )
-                for doc_id, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
-                    if doc_id not in seen:
-                        seen[doc_id] = (doc, meta, 100.0)
-            except Exception:
-                pass
+            for cid, doc, meta, _ in doc_fused[:_DOC_RESULTS]:
+                seen[cid] = (doc, meta, id_to_prox.get(cid, _MIN_DISPLAY_PROXIMITY))
+
+        # ── 2. Tickets: dense + BM25 + RRF ────────────────────────────────
+        if tickets_count > 0:
+            bm25_store.ensure_built(TICKETS_COLLECTION, CHROMA_PATH, EMBED_MODEL)
+
+            t_res = tickets_col.query(
+                query_texts=[question],
+                n_results=min(_TICKET_RESULTS * 3, tickets_count),
+                include=["documents", "metadatas", "distances"],
+            )
+            ticket_dense = list(zip(
+                t_res["ids"][0], t_res["documents"][0],
+                t_res["metadatas"][0], t_res["distances"][0],
+            ))
+            id_to_prox_t = {
+                cid: max(0.0, (1.0 - dist / 2.0) * 100)
+                for cid, _, _, dist in ticket_dense
+            }
+
+            ticket_sparse = bm25_store.search(question, TICKETS_COLLECTION, _TICKET_RESULTS * 3)
+            ticket_fused  = bm25_store.rrf_fuse(ticket_dense, ticket_sparse)
+
+            for cid, doc, meta, _ in ticket_fused[:_TICKET_RESULTS]:
+                prox = id_to_prox_t.get(cid, _MIN_PROXIMITY)
+                if prox >= _MIN_PROXIMITY:
+                    seen[cid] = (doc, meta, prox)
+
+        # ── 3. Keyword exact-match (tickets) ──────────────────────────────
+        if tickets_count > 0:
+            keywords = _extract_keywords(question)
+            for term in keywords:
+                try:
+                    kw = tickets_col.get(
+                        where_document={"$contains": term},
+                        include=["documents", "metadatas"],
+                        limit=_KEYWORD_RESULTS,
+                    )
+                except Exception:
+                    continue
+                for cid, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
+                    if cid not in seen:
+                        seen[cid] = (doc, meta, 100.0)
+
+        # ── 4. Date-filtered search (tickets) ─────────────────────────────
+        if tickets_count > 0:
+            date_prefix = _extract_date_prefix(question)
+            if date_prefix:
+                try:
+                    kw = tickets_col.get(
+                        where_document={"$contains": "Atendimento: " + date_prefix},
+                        include=["documents", "metadatas"],
+                        limit=_DATE_RESULTS,
+                    )
+                    for cid, doc, meta in zip(kw["ids"], kw["documents"], kw["metadatas"]):
+                        if cid not in seen:
+                            seen[cid] = (doc, meta, 100.0)
+                except Exception:
+                    pass
 
         if not seen:
             return "", []
 
-        # Rerank all candidates with a cross-encoder for better relevance ordering.
-        candidates = list(seen.values())  # each: (text, meta, proximity)
-        order = rerank(question, [c[0] for c in candidates])
+        # ── 5. Cross-encoder rerank ────────────────────────────────────────
+        candidates = list(seen.values())
+        order  = rerank(question, [c[0] for c in candidates])
         ranked = [candidates[i] for i in order]
-        top = ranked[: _CONTEXT_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
+        top    = ranked[:_DOC_RESULTS + _TICKET_RESULTS + _KEYWORD_RESULTS + _DATE_RESULTS]
 
         context = "\n---\n".join(entry[0] for entry in top)
-        # Only surface a source in the UI when its match is confident enough.
-        # Keyword/date chunks are always assigned 100.0 so they always qualify.
         sources: list[str] = []
         for _, meta, prox in top:
             if prox >= _MIN_DISPLAY_PROXIMITY:

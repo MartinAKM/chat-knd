@@ -47,7 +47,7 @@ ORACLE_DSN         = os.getenv("ORACLE_DSN", "")
 ORACLE_CLIENT_PATH = os.getenv("ORACLE_CLIENT_PATH", "").strip()
 CHROMA_PATH        = os.getenv("CHROMA_PATH", "chroma_data")
 EMBED_MODEL        = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-COLLECTION_NAME    = os.getenv("CHROMA_COLLECTION", "documents")
+COLLECTION_NAME    = os.getenv("TICKETS_CHROMA_COLLECTION", "tickets")
 OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 SUMMARIZE_MODEL    = os.getenv("SUMMARIZE_MODEL") or os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
 
