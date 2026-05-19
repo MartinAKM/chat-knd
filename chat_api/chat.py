@@ -146,6 +146,34 @@ _CONFIGURED_KEYWORDS: list[str] = _load_keywords()
 # Populated on first query; lives for the duration of the server process.
 _clients_cache: list[str] | None = None
 
+# Cache of document source names (everything whose source does NOT start with "ticket_").
+_doc_sources_cache: list[str] | None = None
+
+
+def _get_doc_sources() -> list[str]:
+    """Return all unique non-ticket source names in the collection."""
+    global _doc_sources_cache
+    if _doc_sources_cache is not None:
+        return _doc_sources_cache
+    try:
+        col    = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+        total  = col.count()
+        sources: set[str] = set()
+        offset = 0
+        while offset < total:
+            data = col.get(include=["metadatas"], limit=1000, offset=offset)
+            for meta in data["metadatas"]:
+                src = meta.get("source", "")
+                if src and not src.startswith("ticket_"):
+                    sources.add(src)
+            offset += len(data["ids"])
+            if len(data["ids"]) < 1000:
+                break
+        _doc_sources_cache = list(sources)
+    except Exception:
+        _doc_sources_cache = []
+    return _doc_sources_cache
+
 
 def _get_known_clients() -> list[str]:
     """Return all unique client names found in ingested ticket chunks."""
@@ -280,22 +308,24 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
 
         # 0. Document-first pass — guarantees document chunks reach the reranker.
         #    Without this, a large ticket corpus buries documents in semantic search.
-        #    Every ticket summary contains "Atendimento:" as a field; documents never do.
-        try:
-            doc_res = col.query(
-                query_texts=[question],
-                n_results=min(_DOC_RESULTS * 2, count),
-                where_document={"$not_contains": "Atendimento:"},
-                include=["documents", "metadatas", "distances"],
-            )
-            for doc_id, doc, meta, dist in zip(
-                doc_res["ids"][0], doc_res["documents"][0],
-                doc_res["metadatas"][0], doc_res["distances"][0],
-            ):
-                proximity = max(0.0, (1.0 - dist / 2.0) * 100)
-                seen[doc_id] = (doc, meta, proximity)  # no threshold — reranker decides
-        except Exception:
-            pass
+        #    Documents are identified by source name not starting with "ticket_".
+        doc_sources = _get_doc_sources()
+        if doc_sources:
+            try:
+                doc_res = col.query(
+                    query_texts=[question],
+                    n_results=min(_DOC_RESULTS * 2, count),
+                    where={"source": {"$in": doc_sources}},
+                    include=["documents", "metadatas", "distances"],
+                )
+                for doc_id, doc, meta, dist in zip(
+                    doc_res["ids"][0], doc_res["documents"][0],
+                    doc_res["metadatas"][0], doc_res["distances"][0],
+                ):
+                    proximity = max(0.0, (1.0 - dist / 2.0) * 100)
+                    seen[doc_id] = (doc, meta, proximity)  # no threshold — reranker decides
+            except Exception:
+                pass
 
         # 1. Semantic search — fetch 3× to give the reranker wider candidate pool
         res = col.query(
