@@ -283,12 +283,33 @@ nav { display: flex; gap: 4px; margin-left: 8px; }
   padding: 1px 5px;
 }
 .msg-row.assistant .msg-bubble pre {
+  position: relative;
   background: #1e293b;
   border-radius: 8px;
   padding: 12px 14px;
   overflow-x: auto;
   margin: 8px 0;
 }
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 5px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  padding: 0;
+}
+.copy-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
+.copy-btn.copied { color: #4ade80; border-color: rgba(74,222,128,.35); background: rgba(74,222,128,.08); }
 .msg-row.assistant .msg-bubble pre code {
   background: none;
   border: none;
