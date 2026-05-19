@@ -39,7 +39,7 @@ The first account created automatically becomes `admin`. All subsequent accounts
 
 ```bash
 # 1. Create and activate a virtual environment using python 3.13 version
-python -3.13 -m venv venv
+py -3.13 -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # Linux / Mac
 
