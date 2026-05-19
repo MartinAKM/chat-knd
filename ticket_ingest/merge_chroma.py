@@ -69,10 +69,20 @@ def merge(source_paths: list[str]) -> None:
         print(f"── Source: {src_path}")
 
         try:
-            src_client = chromadb.PersistentClient(path=src_path)
-            src_col    = src_client.get_or_create_collection(
-                name=COLLECTION_NAME, embedding_function=ef
-            )
+            src_client  = chromadb.PersistentClient(path=src_path)
+            collections = src_client.list_collections()
+            if not collections:
+                # Check if chroma.sqlite3 exists one level deeper (common unzip artifact)
+                import glob as _glob
+                nested = _glob.glob(f"{src_path}/*/chroma.sqlite3")
+                hint   = f" Did you mean: {nested[0].replace('chroma.sqlite3','').rstrip('/\\')}?" if nested else ""
+                print(f"   No collections found in this folder — check the path.{hint}\n")
+                continue
+            col_names = [c.name if hasattr(c, "name") else str(c) for c in collections]
+            src_name  = COLLECTION_NAME if COLLECTION_NAME in col_names else col_names[0]
+            if src_name != COLLECTION_NAME:
+                print(f"   Note: collection '{COLLECTION_NAME}' not found; using '{src_name}' instead.")
+            src_col = src_client.get_collection(name=src_name, embedding_function=ef)
         except Exception as e:
             print(f"   ERROR opening collection: {e}\n")
             continue
