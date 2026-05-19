@@ -33,10 +33,17 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 load_dotenv()
 init_db()
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
-COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-PORT = int(os.getenv("VIEWER_PORT", "8001"))
+CHROMA_PATH   = os.getenv("CHROMA_PATH", "chroma_data")
+EMBED_MODEL   = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+PORT          = int(os.getenv("VIEWER_PORT", "8001"))
+# Documents collection is the fixed ingest target (Processar button always writes here).
+DOCS_COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
+# Active collection for viewing — starts as documents, can be switched via /api/switch-collection.
+_viewer_state: dict = {"collection": DOCS_COLLECTION}
+
+
+def _active() -> str:
+    return _viewer_state["collection"]
 STATIC_DIR = Path(__file__).parent
 
 _STATIC_TYPES = {
@@ -91,15 +98,16 @@ def get_stats():
             "sources": sorted(source_counts.keys()),
             "source_counts": source_counts,
         })
-    return {"collections": result, "active": COLLECTION_NAME}
+    return {"collections": result, "active": _active()}
 
 
 def get_documents(page=1, page_size=30, source=None):
     client = get_client()
+    col_name = _active()
     try:
-        col = client.get_collection(COLLECTION_NAME)
+        col = client.get_collection(col_name)
     except Exception:
-        return {"error": f"Collection '{COLLECTION_NAME}' not found", "items": [], "total": 0}
+        return {"error": f"Collection '{col_name}' not found", "items": [], "total": 0}
 
     total = col.count()
     if source:
@@ -120,7 +128,7 @@ def do_search(query):
         return {"results": []}
     client = get_client()
     try:
-        col = client.get_collection(COLLECTION_NAME)
+        col = client.get_collection(_active())
     except Exception:
         return {"results": [], "error": "Collection not found"}
 
@@ -169,7 +177,7 @@ def do_semantic_search(query: str, min_pct: float = 50.0, n_results: int = 20) -
     if not query.strip():
         return {"results": [], "query": query}
     try:
-        col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+        col = get_collection(CHROMA_PATH, EMBED_MODEL, _active())
     except Exception as e:
         return {"results": [], "error": str(e)}
 
@@ -225,11 +233,12 @@ def handle_delete(body_bytes: bytes):
         return {"ok": False, "error": "Invalid JSON body"}
     if not source:
         return {"ok": False, "error": "Missing 'source' field"}
+    col_name = _active()
     client = get_client()
     try:
-        col = client.get_collection(COLLECTION_NAME)
+        col = client.get_collection(col_name)
     except Exception:
-        return {"ok": False, "error": f"Collection '{COLLECTION_NAME}' not found"}
+        return {"ok": False, "error": f"Collection '{col_name}' not found"}
     existing = col.get(where={"source": source}, include=[])
     count = len(existing["ids"])
     if not count:
@@ -276,14 +285,15 @@ def _parse_upload(rfile, content_type: str, content_length: int):
     raise ValueError("No file part found in upload")
 
 
-def handle_reset_collection():
-    invalidate_collection_cache(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+def handle_reset_collection(col_name: str | None = None):
+    col_name = col_name or _active()
+    invalidate_collection_cache(CHROMA_PATH, EMBED_MODEL, col_name)
     client = get_client()
     try:
-        client.delete_collection(COLLECTION_NAME)
+        client.delete_collection(col_name)
     except Exception:
         pass
-    get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+    get_collection(CHROMA_PATH, EMBED_MODEL, col_name)
     return {"ok": True}
 
 
@@ -291,7 +301,7 @@ def handle_clear_all_chunks():
     """Delete every chunk from the active collection without dropping it."""
     client = get_client()
     try:
-        col = client.get_collection(COLLECTION_NAME)
+        col = client.get_collection(_active())
     except Exception:
         return {"ok": True, "deleted": 0}
     total = col.count()
@@ -326,7 +336,7 @@ def do_ingest(rfile, content_type: str, content_length: int):
         chunks = [c for c in chunk_text(text) if is_good_chunk(c)]
         if not chunks:
             return {"ok": False, "error": "No usable content found after cleaning."}
-        col = get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+        col = get_collection(CHROMA_PATH, EMBED_MODEL, DOCS_COLLECTION)
         upsert_chunks(col, filename, chunks)
         return {"ok": True, "filename": filename, "chunks": len(chunks)}
     finally:
@@ -567,7 +577,28 @@ class Handler(BaseHTTPRequestHandler):
             # ── Admin-only endpoints ───────────────────────────────────────
             elif p == "/api/reset-collection":
                 if not self._require_role("admin", api=True): return
-                self.send_json(handle_reset_collection())
+                body = {}
+                if length > 0:
+                    try:
+                        body = json.loads(self.rfile.read(length))
+                    except Exception:
+                        pass
+                self.send_json(handle_reset_collection(body.get("collection")))
+
+            elif p == "/api/switch-collection":
+                if not self._require_role("admin", api=True): return
+                body = json.loads(self.rfile.read(length))
+                name = body.get("collection", "").strip()
+                if not name:
+                    self.send_json({"ok": False, "error": "Missing 'collection' field"})
+                    return
+                try:
+                    get_client().get_collection(name)
+                except Exception:
+                    self.send_json({"ok": False, "error": f"Coleção '{name}' não encontrada."})
+                    return
+                _viewer_state["collection"] = name
+                self.send_json({"ok": True, "collection": name})
 
             elif p == "/api/clear-all":
                 if not self._require_role("admin", api=True): return
@@ -613,11 +644,11 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"ChatKND  ->  http://localhost:{PORT}")
-    print(f"  Collection : {COLLECTION_NAME}")
+    print(f"  Collection : {DOCS_COLLECTION}")
     print(f"  Data path  : {CHROMA_PATH}")
 
     print("  Loading embedding model...", end=" ", flush=True)
-    get_collection(CHROMA_PATH, EMBED_MODEL, COLLECTION_NAME)
+    get_collection(CHROMA_PATH, EMBED_MODEL, DOCS_COLLECTION)
     print("done")
 
     print("  Loading reranker model...  ", end=" ", flush=True)

@@ -11,7 +11,8 @@ async function loadStats() {
   const data = await api('/api/stats');
   if (data.error) { document.getElementById('s-chunks').textContent = 'Error'; return; }
   const col = data.collections.find(c => c.name === data.active) || data.collections[0];
-  document.getElementById('s-cols').textContent = data.collections.length;
+  document.getElementById('s-cols').textContent = data.active;
+  state.collection = data.active;
   if (col) {
     document.getElementById('s-chunks').textContent = col.count.toLocaleString();
     document.getElementById('s-sources').textContent = col.sources.length;
@@ -362,9 +363,31 @@ async function clearAllChunks() {
   }
 }
 
-async function resetCollection() {
+async function switchCollection(name) {
+  const r = await fetch('/api/switch-collection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ collection: name }),
+  });
+  const data = await r.json();
+  if (!data.ok) {
+    Swal.fire({
+      text: data.error || 'Erro ao trocar coleção.',
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
+      customClass: { popup: 'custom-swal' },
+    });
+    return;
+  }
+  document.querySelector('.modal-backdrop').classList.remove('open');
+  await loadStats();
+  clearSearch();
+}
+
+async function resetCollection(colName) {
   const result = await Swal.fire({
-    text: 'Tem certeza que deseja deletar a Collection?',
+    text: `Tem certeza que deseja deletar a coleção "${colName}"?`,
     icon: 'question',
     showCancelButton: true,
     confirmButtonColor: '#1e3a5f',
@@ -382,11 +405,15 @@ async function resetCollection() {
   if (!result.isConfirmed) return;
 
   try {
-    const r = await fetch('/api/reset-collection', { method: 'POST' });
+    const r = await fetch('/api/reset-collection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection: colName }),
+    });
     const data = await r.json();
     if (data.ok) {
-      Swal.fire({ 
-        text: 'Collection deletada com sucesso.', 
+      Swal.fire({
+        text: 'Coleção deletada com sucesso.',
         icon: 'success',
         confirmButtonColor: '#1e3a5f',
         heightAuto: false,
@@ -444,51 +471,46 @@ async function logout() {
 initUser();
 loadStats();
 
-function renderCollections(collections) {
+function renderCollections(collections, active) {
   const container = document.getElementById('collections-list');
-
-  container.innerHTML = collections.map(col => `
+  container.innerHTML = collections.map(col => {
+    const isActive = col.name === active;
+    const safeName = col.name.replace(/'/g, "\\'");
+    return `
     <div class="collection-card">
-
       <div class="collection-header">
-        <div class="collection-name">${col.name}</div>
-
-        ${col.name === 'documents'
-          ? '<div class="collection-badge active">ATIVO</div>'
-          : '<div class="collection-badge active">INATIVO</div>'
-        }
+        <div class="collection-name">${escHtml(col.name)}</div>
+        <div class="collection-badge ${isActive ? 'is-active' : ''}">${isActive ? 'ATIVO' : 'INATIVO'}</div>
       </div>
-
-    <div class="collection-info">
-      <div>
+      <div class="collection-info">
         <div class="collection-stats">
           <div class="collection-stat">
             <span class="label">Chunks</span>
-            <span class="value">${col.count}</span>
+            <span class="value">${col.count.toLocaleString()}</span>
           </div>
-
           <div class="collection-stat">
             <span class="label">Arquivos</span>
             <span class="value">${col.sources.length}</span>
           </div>
         </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${!isActive ? `<button class="collection-switch-btn" onclick="switchCollection('${safeName}')">Visualizar</button>` : ''}
+          <button class="collection-delete-btn" onclick="resetCollection('${safeName}')" title="Deletar coleção">
+            <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 3V4H4V6H5V19C5 20.1 5.9 21 7 21H17C18.1 21 19 20.1 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/>
+            </svg>
+          </button>
+        </div>
       </div>
-        <button class="collection-delete-btn" onclick="resetCollection()" title="Deletar coleção">
-          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M9 3V4H4V6H5V19C5 20.1 5.9 21 7 21H17C18.1 21 19 20.1 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/>
-          </svg>
-        </button>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 async function openModalCollection() {
   const modal = document.querySelector('.modal-backdrop');
   modal.classList.toggle('open');
-
   const data = await api('/api/stats');
-  console.log(data.collections);
-  renderCollections(data.collections);
+  renderCollections(data.collections, data.active);
 }
 
 function closeCollectionActions(event) {
