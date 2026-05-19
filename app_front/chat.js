@@ -9,6 +9,7 @@ marked.use({ breaks: true, gfm: true });
 let busy = false;
 let abortController = null;
 let attachedImages = []; // { dataUrl, base64 }
+let user = '';
 
 function stopGeneration() {
   if (abortController) abortController.abort();
@@ -210,7 +211,7 @@ function appendMessage(role, text, sources, images) {
 
   const meta = document.createElement("div");
   meta.className = "msg-meta";
-  meta.textContent = role === "user" ? "You" : "ChatKND";
+  meta.textContent = role === "user" ? user.name : "ChatKND";
 
   row.appendChild(bubble);
   row.appendChild(meta);
@@ -545,7 +546,7 @@ async function initUser() {
   try {
     const res = await fetch("/api/auth/me");
     if (res.status === 401) { window.location.href = "/login"; return; }
-    const user = await res.json();
+    user = await res.json();
     document.getElementById("header-user-name").textContent = user.name;
     if (user.role === "admin") {
       document.getElementById("nav-viewer").style.display = "";
