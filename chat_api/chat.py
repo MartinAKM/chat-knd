@@ -30,6 +30,7 @@ COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "documents")
 _CONTEXT_RESULTS       = 5   # max chunks from semantic search
 _KEYWORD_RESULTS       = 5   # max extra chunks from keyword search
 _DATE_RESULTS          = 10  # max chunks from date-filtered search
+_DOC_RESULTS           = 3   # document chunks always added to pool before ticket search
 _MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
 _MIN_DISPLAY_PROXIMITY = 65.0  # minimum score to surface a source in the UI
 _MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
@@ -276,6 +277,25 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         # Results keyed by chunk id to deduplicate across both searches.
         # Value: (document_text, metadata, proximity_pct)
         seen: dict[str, tuple[str, dict, float]] = {}
+
+        # 0. Document-first pass — guarantees document chunks reach the reranker.
+        #    Without this, a large ticket corpus buries documents in semantic search.
+        #    Every ticket summary contains "Atendimento:" as a field; documents never do.
+        try:
+            doc_res = col.query(
+                query_texts=[question],
+                n_results=min(_DOC_RESULTS * 2, count),
+                where_document={"$not_contains": "Atendimento:"},
+                include=["documents", "metadatas", "distances"],
+            )
+            for doc_id, doc, meta, dist in zip(
+                doc_res["ids"][0], doc_res["documents"][0],
+                doc_res["metadatas"][0], doc_res["distances"][0],
+            ):
+                proximity = max(0.0, (1.0 - dist / 2.0) * 100)
+                seen[doc_id] = (doc, meta, proximity)  # no threshold — reranker decides
+        except Exception:
+            pass
 
         # 1. Semantic search — fetch 3× to give the reranker wider candidate pool
         res = col.query(
