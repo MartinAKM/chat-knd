@@ -170,6 +170,24 @@ def consume_reset_token(token: str, new_password: str) -> bool:
     return True
 
 
+# ── User management ───────────────────────────────────────────────────────
+
+def list_users() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, surname, email, role, created_at FROM users ORDER BY created_at"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_user_role(user_id: str, role: str) -> bool:
+    if role not in ("admin", "user"):
+        return False
+    with _connect() as conn:
+        cur = conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    return cur.rowcount > 0
+
+
 # ── Email ──────────────────────────────────────────────────────────────────
 
 def send_reset_email(to_email: str, token: str, base_url: str | None = None) -> None:

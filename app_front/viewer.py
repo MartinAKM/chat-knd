@@ -22,8 +22,8 @@ from chat_api.history import (
 from auth.db import (
     authenticate, consume_reset_token, create_reset_token,
     create_session, create_user, delete_session,
-    get_session_user, init_db, send_reset_email,
-    SESSION_DAYS,
+    get_session_user, init_db, list_users, send_reset_email,
+    set_user_role, SESSION_DAYS,
 )
 
 
@@ -463,6 +463,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not self._require_role("admin", api=True): return
                 self.send_json(do_semantic_search(params.get("q", [""])[0]))
 
+            elif path == "/api/users":
+                if not self._require_role("admin", api=True): return
+                self.send_json({"users": list_users()})
+
             # ── User-or-admin API ──────────────────────────────────────────
             elif path == "/api/history":
                 user = self._require_role("user", api=True)
@@ -534,8 +538,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not all([name, surname, email, pwd]):
                     self.send_json({"ok": False, "error": "Todos os campos são obrigatórios."})
                     return
-                if len(pwd) < 8:
-                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 8 caracteres."})
+                if len(pwd) < 3:
+                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 3 caracteres."})
                     return
                 user = create_user(name, surname, email, pwd)
                 if not user:
@@ -567,14 +571,25 @@ class Handler(BaseHTTPRequestHandler):
                 body  = json.loads(self.rfile.read(length))
                 token = body.get("token", "").strip()
                 pwd   = body.get("password", "")
-                if len(pwd) < 8:
-                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 8 caracteres."})
+                if len(pwd) < 3:
+                    self.send_json({"ok": False, "error": "A senha deve ter no mínimo 3 caracteres."})
                     return
                 ok = consume_reset_token(token, pwd)
                 if ok:
                     self.send_json({"ok": True})
                 else:
                     self.send_json({"ok": False, "error": "Link inválido ou expirado."})
+
+            elif p == "/api/auth/set-role":
+                user = self._require_role("admin", api=True)
+                if not user: return
+                body    = json.loads(self.rfile.read(length))
+                user_id = body.get("user_id", "").strip()
+                role    = body.get("role", "").strip()
+                if user_id == user["id"]:
+                    self.send_json({"ok": False, "error": "Não é possível alterar o próprio perfil."})
+                    return
+                self.send_json({"ok": set_user_role(user_id, role)})
 
             # ── Admin-only endpoints ───────────────────────────────────────
             elif p == "/api/reset-collection":

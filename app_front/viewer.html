@@ -16,6 +16,7 @@
   </nav>
   <div class="header-user">
     <span id="header-user-name"></span>
+    <button class="users-btn" id="users-btn" style="display:none" onclick="openUsersModal()">Usuários</button>
     <button class="logout-btn" onclick="logout()">Sair</button>
   </div>
 </header>
@@ -24,6 +25,13 @@
   <div class="stat"><span class="stat-label">Total Chunks</span><span class="stat-value" id="s-chunks">—</span></div>
   <div class="stat"><span class="stat-label">Total Arquivos</span><span class="stat-value" id="s-sources">—</span></div>
   <div class="stat collection" onclick="openModalCollection()"><span class="stat-label">Coleção Ativa ↗</span><span class="stat-value" id="s-cols" style="font-size:.95rem;padding-top:4px">—</span></div>
+</div>
+
+<div class="modal-backdrop-users" onclick="closeUsersModal(event)">
+  <div class="modal-users">
+    <div class="modal-users-title"><h1>Usuários</h1></div>
+    <div id="users-list" class="users-list"></div>
+  </div>
 </div>
 
 <div class="modal-backdrop" onclick="closeCollectionActions(event)">

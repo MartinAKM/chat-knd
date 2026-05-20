@@ -449,16 +449,84 @@ async function resetCollection(colName) {
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 
+let _currentUserId = null;
+
 async function initUser() {
   try {
     const res = await fetch("/api/auth/me");
     if (res.status === 401) { window.location.href = "/login"; return; }
     const user = await res.json();
+    _currentUserId = user.id;
     document.getElementById("header-user-name").textContent = user.name;
     if (user.role === "admin") {
-      document.getElementById("nav-viewer").style.display = "";
+      document.getElementById("users-btn").style.display = "";
     }
   } catch (_) {}
+}
+
+// ── Users modal ────────────────────────────────────────────────────────────
+
+function openUsersModal() {
+  document.querySelector('.modal-backdrop-users').classList.add('open');
+  loadUsers();
+}
+
+function closeUsersModal(event) {
+  if (event.target.classList.contains('modal-backdrop-users')) {
+    document.querySelector('.modal-backdrop-users').classList.remove('open');
+  }
+}
+
+async function loadUsers() {
+  const container = document.getElementById('users-list');
+  container.innerHTML = '<div class="empty">Carregando…</div>';
+  const data = await api('/api/users');
+  if (!data.users || !data.users.length) {
+    container.innerHTML = '<div class="empty">Nenhum usuário encontrado.</div>';
+    return;
+  }
+  container.innerHTML = data.users.map(u => {
+    const initials = (u.name[0] + u.surname[0]).toUpperCase();
+    const isAdmin  = u.role === 'admin';
+    const isSelf   = u.id === _currentUserId;
+    const newRole  = isAdmin ? 'user' : 'admin';
+    const btnLabel = isAdmin ? 'Remover Admin' : 'Tornar Admin';
+    const safeId   = u.id.replace(/'/g, "\\'");
+    return `
+    <div class="user-card">
+      <div class="user-avatar">${escHtml(initials)}</div>
+      <div class="user-info">
+        <div class="user-name">${escHtml(u.name)} ${escHtml(u.surname)}</div>
+        <div class="user-email">${escHtml(u.email)}</div>
+      </div>
+      <div class="user-role-badge ${isAdmin ? 'is-admin' : ''}">${isAdmin ? 'ADMIN' : 'USUÁRIO'}</div>
+      <button class="user-role-btn ${isAdmin ? 'demote' : 'promote'}"
+        ${isSelf ? 'disabled title="Não é possível alterar o próprio perfil."' : ''}
+        onclick="setUserRole('${safeId}','${newRole}')">
+        ${escHtml(btnLabel)}
+      </button>
+    </div>`;
+  }).join('');
+}
+
+async function setUserRole(userId, role) {
+  const r = await fetch('/api/auth/set-role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+  const data = await r.json();
+  if (data.ok) {
+    await loadUsers();
+  } else {
+    Swal.fire({
+      text: data.error || 'Erro ao alterar perfil.',
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
+      customClass: { popup: 'custom-swal' },
+    });
+  }
 }
 
 async function logout() {
