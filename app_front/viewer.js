@@ -487,7 +487,7 @@ function renderCollections(collections, active) {
         <div class="collection-stats">
           <div class="collection-stat">
             <span class="label">Chunks</span>
-            <span class="value">${col.count.toLocaleString()}</span>
+            <span class="value">${col.count}</span>
           </div>
           <div class="collection-stat">
             <span class="label">Arquivos</span>
