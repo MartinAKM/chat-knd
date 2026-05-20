@@ -172,8 +172,8 @@ def consume_reset_token(token: str, new_password: str) -> bool:
 
 # ── Email ──────────────────────────────────────────────────────────────────
 
-def send_reset_email(to_email: str, token: str) -> None:
-    reset_url = f"{APP_URL}/set-password?token={token}"
+def send_reset_email(to_email: str, token: str, base_url: str | None = None) -> None:
+    reset_url = f"{base_url or APP_URL}/set-password?token={token}"
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "ChatKND — Redefinição de senha"
     msg["From"]    = SMTP_FROM

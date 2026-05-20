@@ -556,7 +556,9 @@ class Handler(BaseHTTPRequestHandler):
                 token = create_reset_token(email)
                 if token:
                     try:
-                        send_reset_email(email, token)
+                        host = self.headers.get("Host", "")
+                        base_url = f"http://{host}" if host else None
+                        send_reset_email(email, token, base_url)
                     except Exception:
                         pass  # never reveal email existence or SMTP errors
                 self.send_json({"ok": True})  # always ok to prevent email enumeration
