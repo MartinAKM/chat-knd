@@ -7,18 +7,20 @@ from dotenv import load_dotenv
 from chunker import chunk_text
 from chroma_store import delete_chunks, get_collection, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
-from reader import SUPPORTED_EXTENSIONS, extract_text
+from reader import SUPPORTED_EXTENSIONS, extract_with_images
 
 load_dotenv()
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_data")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
+CHROMA_PATH     = os.getenv("CHROMA_PATH", "chroma_data")
+EMBED_MODEL     = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+COLLECTION      = os.getenv("CHROMA_COLLECTION", "documents")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+VISION_MODEL    = os.getenv("SUMMARIZE_MODEL") or os.getenv("CHAT_MODEL", "")
 
 
 def process_file(path: Path, collection) -> None:
-    print(f"Processing {path.name}...")
-    raw = extract_text(path)
+    print(f"Processing {path.name}…")
+    raw = extract_with_images(path, OLLAMA_BASE_URL, VISION_MODEL)
     text = clean_text(strip_rotina_block(raw))
     chunks = [c for c in chunk_text(text) if is_good_chunk(c)]
     upsert_chunks(collection, path.name, chunks)

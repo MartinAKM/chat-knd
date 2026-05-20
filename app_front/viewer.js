@@ -269,6 +269,8 @@ async function ingestFile() {
   const files = Array.from(input.files);
   const btn = document.getElementById('ingest-btn');
   btn.disabled = true;
+  btn.classList.add('loading');
+  btn.innerHTML = '<span></span><span></span><span></span>';
 
   let totalChunks = 0;
   const errors = [];
@@ -303,6 +305,8 @@ async function ingestFile() {
   }
 
   btn.disabled = false;
+  btn.classList.remove('loading');
+  btn.innerHTML = 'Processar';
 }
 
 async function clearAllChunks() {

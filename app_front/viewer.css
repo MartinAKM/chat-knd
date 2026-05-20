@@ -459,6 +459,27 @@ main {
     opacity: .4;
     cursor: default;
 }
+.ingest-btn.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: default;
+}
+.ingest-btn.loading span {
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+    animation: bounce 1.1s infinite ease-in-out;
+}
+.ingest-btn.loading span:nth-child(2) { animation-delay: .18s; }
+.ingest-btn.loading span:nth-child(3) { animation-delay: .36s; }
+
+@keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30%            { transform: translateY(-5px); }
+}
 .ingest-status {
     margin-top: 7px;
     font-size: .73rem;

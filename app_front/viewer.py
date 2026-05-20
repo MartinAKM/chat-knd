@@ -13,9 +13,9 @@ sys.path.insert(0, str(_ROOT))
 from chunker import chunk_text
 from chroma_store import get_collection, invalidate_collection_cache, upsert_chunks
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
-from reader import SUPPORTED_EXTENSIONS, extract_text
+from reader import SUPPORTED_EXTENSIONS, extract_with_images
 from reranker import rerank, warm_up as reranker_warm_up
-from chat_api.chat import stream_generate as chat_stream, _get_known_clients
+from chat_api.chat import stream_generate as chat_stream, _ensure_running as _ensure_ollama, _get_known_clients
 from chat_api.history import (
     delete_conversation, get_conversation, list_conversations,
 )
@@ -33,9 +33,11 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 load_dotenv()
 init_db()
 
-CHROMA_PATH   = os.getenv("CHROMA_PATH", "chroma_data")
-EMBED_MODEL   = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-PORT          = int(os.getenv("VIEWER_PORT", "8001"))
+CHROMA_PATH     = os.getenv("CHROMA_PATH", "chroma_data")
+EMBED_MODEL     = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+PORT            = int(os.getenv("VIEWER_PORT", "8001"))
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+VISION_MODEL    = os.getenv("SUMMARIZE_MODEL") or os.getenv("CHAT_MODEL", "")
 # Documents collection is the fixed ingest target (Processar button always writes here).
 DOCS_COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
 # Active collection for viewing — starts as documents, can be switched via /api/switch-collection.
@@ -331,7 +333,9 @@ def do_ingest(rfile, content_type: str, content_length: int):
         tmp_path = Path(tmp.name)
 
     try:
-        raw = extract_text(tmp_path)
+        if VISION_MODEL:
+            _ensure_ollama()
+        raw = extract_with_images(tmp_path, OLLAMA_BASE_URL, VISION_MODEL)
         text = clean_text(strip_rotina_block(raw))
         chunks = [c for c in chunk_text(text) if is_good_chunk(c)]
         if not chunks:
