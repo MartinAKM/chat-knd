@@ -14,7 +14,7 @@ async function loadStats() {
   document.getElementById('s-cols').textContent = data.active;
   state.collection = data.active;
   if (col) {
-    document.getElementById('s-chunks').textContent = col.count.toLocaleString();
+    document.getElementById('s-chunks').textContent = col.count;
     document.getElementById('s-sources').textContent = col.sources.length;
     renderSources(col.sources, col.source_counts);
   }
@@ -473,6 +473,8 @@ loadStats();
 
 function renderCollections(collections, active) {
   const container = document.getElementById('collections-list');
+  const ICON_DELETE = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="currentColor"> <path d="M9 3V4H4V6H5V19C5 20.1 5.9 21 7 21H17C18.1 21 19 20.1 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/></svg>`;
+  const ICON_VIEW = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/> <circle cx="12" cy="12" r="3"/> </svg>`;
   container.innerHTML = collections.map(col => {
     const isActive = col.name === active;
     const safeName = col.name.replace(/'/g, "\\'");
@@ -480,7 +482,6 @@ function renderCollections(collections, active) {
     <div class="collection-card">
       <div class="collection-header">
         <div class="collection-name">${escHtml(col.name)}</div>
-        <div class="collection-badge ${isActive ? 'is-active' : ''}">${isActive ? 'ATIVO' : 'INATIVO'}</div>
       </div>
       <div class="collection-info">
         <div class="collection-stats">
@@ -494,11 +495,9 @@ function renderCollections(collections, active) {
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
-          ${!isActive ? `<button class="collection-switch-btn" onclick="switchCollection('${safeName}')">Visualizar</button>` : ''}
+          ${!isActive ? `<button class="collection-switch-btn" onclick="switchCollection('${safeName}')">${ICON_VIEW}</button>` : ''}
           <button class="collection-delete-btn" onclick="resetCollection('${safeName}')" title="Deletar coleção">
-            <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 3V4H4V6H5V19C5 20.1 5.9 21 7 21H17C18.1 21 19 20.1 19 19V6H20V4H15V3H9M7 6H17V19H7V6M9 8V17H11V8H9M13 8V17H15V8H13Z"/>
-            </svg>
+            ${ICON_DELETE}
           </button>
         </div>
       </div>

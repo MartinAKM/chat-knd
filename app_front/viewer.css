@@ -610,19 +610,29 @@ main {
     color: #15803d;
 }
 .collection-switch-btn {
-    padding: 6px 14px;
-    background: #1e3a5f;
-    color: #fff;
+    opacity: 0;
     border: none;
     border-radius: 6px;
-    font-size: .78rem;
-    font-family: inherit;
     cursor: pointer;
     transition: opacity .15s;
+    height: 30px;
+    width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
 }
-.collection-switch-btn:hover {
-    opacity: .85;
+.collection-card:hover .collection-switch-btn {
+    opacity: 1;
 }
+button.collection-switch-btn {
+    color: #94a3b8;
+}
+button.collection-switch-btn:hover {
+    color: #15803d;
+    background: #dcfce7;
+}
+
 .collection-info {
     display: flex;
     justify-content: space-between;
