@@ -9,15 +9,16 @@ RAG-based AI assistant for Kunden Systems ERP consultants. Consultants receive O
 | `admin` | Full access — Document Viewer, Chat, all API endpoints |
 | `user` | Chat only |
 
-The first account created automatically becomes `admin`. All subsequent accounts are `user` by default; role changes must be made directly in `auth.db`. Users can reset their password via an email link (requires SMTP env vars).
+The first account created automatically becomes `admin`. All subsequent accounts are `user` by default. Admins can promote or demote users via the **Usuários** button in the Document Viewer header. Users can reset their password via an email link (requires SMTP env vars).
 
 ## How it works
 
 1. ERP documents (PDF, DOCX, TXT, MD) and Oracle support tickets are ingested into a local ChromaDB vector store
 2. Documents are cleaned, chunked, and embedded with `sentence-transformers/all-MiniLM-L6-v2` (runs fully locally)
-3. Support tickets are summarised by a local LLM (Ollama) into structured chunks before storage
-4. The Chat interface answers questions using hybrid retrieval (semantic + keyword) and streams a response from Ollama
-5. The Document Viewer lets you browse, search, and manage the stored knowledge base
+3. Embedded images in documents (screenshots, error dialogs) are described by a vision-capable LLM and injected inline so their content is searchable
+4. Support tickets are summarised by a local LLM (Ollama) into structured chunks before storage
+5. The Chat interface answers questions using hybrid retrieval (semantic + BM25 keyword) and streams a response from Ollama
+6. The Document Viewer lets you browse, search, and manage the stored knowledge base
 
 ## Stack
 
@@ -83,7 +84,7 @@ Navigate to **Document Viewer** in the top nav (or go to `http://localhost:8001/
 
 **Semantic search** — find chunks by meaning using vector similarity. Only chunks above **60%** proximity are shown.
 
-**Upload & Ingest** — drag or pick one or more files in the sidebar. The full ingestion pipeline runs server-side and the source list refreshes automatically.
+**Upload & Ingest** — drag or pick one or more files in the sidebar. The full ingestion pipeline runs server-side, including a vision pass for embedded images (requires a vision-capable model via `SUMMARIZE_MODEL` or `CHAT_MODEL`). The source list refreshes automatically.
 
 **Delete** — hover a source in the sidebar and click **✕** to remove all its chunks.
 
@@ -107,6 +108,8 @@ python doc_reader/ingest.py --delete document.pdf
 Supported formats: `.pdf`, `.docx`, `.txt`, `.md`
 
 The pipeline automatically cleans text, strips ERP navigation metadata (ROTINA / BASE / ACESSO blocks), removes greetings and junk lines, splits into overlapping chunks (800 chars, 100 overlap), and drops low-quality chunks before embedding.
+
+Images embedded in PDF and DOCX files are described by the vision model and injected inline at the image position so that error codes, highlighted fields, and screenshots become part of the searchable text. Requires Ollama running with a vision-capable model set in `SUMMARIZE_MODEL` or `CHAT_MODEL`.
 
 ## Ingesting Oracle support tickets
 
@@ -146,7 +149,7 @@ Edit `keywords.json` at the project root to configure terms that always trigger 
 }
 ```
 
-ERP program codes (e.g. `CFAB24`, `EPRO15`) are also auto-detected from the user's question via regex and added to keyword search automatically.
+ERP program codes (e.g. `CFAB24`, `EPRO15`) are also auto-detected from the user's question via regex and added to keyword search automatically. Detection is case-insensitive — `cext24` and `CEXT24` retrieve the same results.
 
 ## Project structure
 
@@ -202,6 +205,6 @@ See `.env.example` for the full list with descriptions. Key variables:
 | `CHAT_HISTORY_DIR` | Directory for per-user chat history (default: `chat_history/`) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP server for password reset emails |
 | `SMTP_FROM` | Sender address for password reset emails |
-| `APP_URL` | Public base URL used in reset email links (e.g. `http://localhost:8001`) |
+| `APP_URL` | Fallback base URL for reset email links; the server uses the HTTP `Host` header when available |
 
 `.env` is never committed. Copy `.env.example` to get started.
