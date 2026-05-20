@@ -37,8 +37,8 @@ _MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
 _MIN_DISPLAY_PROXIMITY = 65.0  # minimum score to surface a source in the UI
 _MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
 
-# Matches typical ERP program codes: 2-6 uppercase letters + 1-6 digits (e.g. CFAB24, EPRO15)
-_ERP_CODE_RE = re.compile(r"\b[A-Z]{2,6}\d{1,6}\b")
+# Matches typical ERP program codes: 2-6 letters + 1-6 digits (e.g. CFAB24, cext24, EPRO15)
+_ERP_CODE_RE = re.compile(r"\b[A-Za-z]{2,6}\d{1,6}\b")
 
 # Matches ticket numbers: YYMMDD + 3-digit sequence (e.g. 250922016)
 _TICKET_RE = re.compile(r"\b2\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}\b")
@@ -192,9 +192,12 @@ def _extract_keywords(question: str) -> list[str]:
     """
     found: list[str] = []
 
-    # Auto-detect ERP codes (e.g. CFAB24, EPRO15)
+    # Auto-detect ERP codes (e.g. CFAB24, cext24) — normalize to uppercase since
+    # stored tickets always use uppercase program codes.
     for match in _ERP_CODE_RE.finditer(question):
-        found.append(match.group())
+        code = match.group().upper()
+        if code not in found:
+            found.append(code)
 
     # Auto-detect ticket numbers (e.g. 250922016 → YYMMDD + 3-digit sequence)
     for match in _TICKET_RE.finditer(question):
