@@ -31,11 +31,13 @@ CHROMA_PATH        = os.getenv("CHROMA_PATH", "chroma_data")
 EMBED_MODEL        = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 DOCS_COLLECTION    = os.getenv("CHROMA_COLLECTION", "documents")
 TICKETS_COLLECTION = os.getenv("TICKETS_CHROMA_COLLECTION", "tickets")
+CHATS_COLLECTION   = os.getenv("CHATS_COLLECTION", "chats")
 
 _DOC_RESULTS           = 3   # max chunks from documents collection
 _TICKET_RESULTS        = 5   # max chunks from tickets collection (dense + BM25)
 _KEYWORD_RESULTS       = 5   # max extra ticket chunks from keyword exact-match
 _DATE_RESULTS          = 10  # max extra ticket chunks from date-filtered search
+_CHATS_RESULTS         = 3   # max chunks from learned-chats collection
 _MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
 _MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
 
@@ -342,7 +344,27 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
                 if prox >= _MIN_PROXIMITY:
                     seen[cid] = (doc, meta, prox)
 
-        # ── 3. Keyword exact-match (tickets) ──────────────────────────────
+        # ── 3. Chats (learned knowledge): dense search ────────────────────
+        try:
+            chats_col   = get_collection(CHROMA_PATH, EMBED_MODEL, CHATS_COLLECTION)
+            chats_count = chats_col.count()
+            if chats_count > 0:
+                c_res = chats_col.query(
+                    query_texts=[question],
+                    n_results=min(_CHATS_RESULTS, chats_count),
+                    include=["documents", "metadatas", "distances"],
+                )
+                for cid, doc, meta, dist in zip(
+                    c_res["ids"][0], c_res["documents"][0],
+                    c_res["metadatas"][0], c_res["distances"][0],
+                ):
+                    prox = max(0.0, (1.0 - dist / 2.0) * 100)
+                    if prox >= _MIN_PROXIMITY and cid not in seen:
+                        seen[cid] = (doc, meta, prox)
+        except Exception:
+            pass
+
+        # ── 5. Keyword exact-match (tickets) ──────────────────────────────
         if tickets_count > 0:
             keywords = _extract_keywords(question)
             for term in keywords:
@@ -358,7 +380,7 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
                     if cid not in seen:
                         seen[cid] = (doc, meta, 100.0)
 
-        # ── 4. Date-filtered search (tickets) ─────────────────────────────
+        # ── 6. Date-filtered search (tickets) ─────────────────────────────
         if tickets_count > 0:
             date_prefix = _extract_date_prefix(question)
             if date_prefix:
@@ -377,7 +399,7 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
         if not seen:
             return "", []
 
-        # ── 5. Cross-encoder rerank ────────────────────────────────────────
+        # ── 7. Cross-encoder rerank ────────────────────────────────────────
         candidates = list(seen.values())
         order  = rerank(question, [c[0] for c in candidates])
         ranked = [candidates[i] for i in order]
@@ -490,6 +512,69 @@ def _extract_image_terms(images: list[str]) -> str:
         return "".join(tokens).strip()
     except Exception as e:
         print(f"[chat] image term extraction failed: {e}", file=sys.stderr)
+        return ""
+
+
+# ── Conversation summarisation (learn feature) ─────────────────────────────
+
+_SUMMARY_PROMPT = (
+    "Analise a conversa abaixo entre um consultor de ERP e o assistente ChatKND.\n"
+    "Crie um documento de conhecimento objetivo com:\n"
+    "1. Tópico ou problema principal abordado\n"
+    "2. Códigos de erro, programas ERP, tickets ou dados técnicos mencionados\n"
+    "3. Correções feitas pelo consultor a respostas incorretas do assistente\n"
+    "4. Solução ou conclusão final\n\n"
+    "Escreva de forma direta e factual, como uma base de conhecimento interna.\n"
+    "Preserve códigos exatos (KND-XXXXX, ORA-XXXXX, nomes de programas).\n"
+    "Não mencione que é um resumo de conversa.\n\n"
+    "CONVERSA:\n{conversation}\n\n"
+    "DOCUMENTO DE CONHECIMENTO:"
+)
+
+
+def generate_summary(messages: list[dict]) -> str:
+    """
+    Summarise a conversation into a reusable knowledge document.
+    Uses streaming so cold model-load does not trigger a timeout.
+    Returns an empty string on any failure.
+    """
+    lines = []
+    for msg in messages:
+        role    = "Consultor" if msg["role"] == "user" else "Assistente"
+        content = msg.get("content", "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    if not lines:
+        return ""
+
+    prompt  = _SUMMARY_PROMPT.format(conversation="\n".join(lines))
+    payload = json.dumps({
+        "model":    CHAT_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream":   True,
+    }).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        tokens: list[str] = []
+        with urllib.request.urlopen(req, timeout=300) as r:
+            for raw_line in r:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                token = chunk.get("message", {}).get("content", "")
+                if token:
+                    tokens.append(token)
+                if chunk.get("done"):
+                    break
+        return "".join(tokens).strip()
+    except Exception as e:
+        print(f"[chat] summary generation failed: {e}", file=sys.stderr)
         return ""
 
 

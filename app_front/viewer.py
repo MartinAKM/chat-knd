@@ -1,4 +1,5 @@
 import json, os, socketserver, sys, tempfile, re
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -15,7 +16,7 @@ from chroma_store import get_collection, invalidate_collection_cache, upsert_chu
 from cleaner import clean_text, is_good_chunk, strip_rotina_block
 from reader import SUPPORTED_EXTENSIONS, extract_with_images
 from reranker import rerank, warm_up as reranker_warm_up
-from chat_api.chat import stream_generate as chat_stream, _ensure_running as _ensure_ollama, _get_known_clients
+from chat_api.chat import stream_generate as chat_stream, _ensure_running as _ensure_ollama, _get_known_clients, generate_summary
 from chat_api.history import (
     delete_conversation, get_conversation, list_conversations,
 )
@@ -30,6 +31,27 @@ from auth.db import (
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
+
+def do_learn(conversation_id: str, user_id: str, user_name: str) -> dict:
+    """Summarise a conversation and store it in the chats collection."""
+    from chat_api.history import get_conversation
+    conv = get_conversation(conversation_id, user_id)
+    if not conv:
+        return {"ok": False, "error": "Conversa não encontrada."}
+    messages = [m for m in conv.get("messages", []) if m.get("content", "").strip()]
+    if len(messages) < 2:
+        return {"ok": False, "error": "Conversa muito curta para aprender."}
+
+    summary = generate_summary(messages)
+    if not summary:
+        return {"ok": False, "error": "Não foi possível gerar o resumo. Verifique se o Ollama está rodando."}
+
+    source = f"{user_name} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    chats_col = get_collection(CHROMA_PATH, EMBED_MODEL, CHATS_COLLECTION)
+    upsert_chunks(chats_col, source, [summary])
+    _invalidate_source_cache(CHATS_COLLECTION)
+    return {"ok": True, "source": source}
+
 load_dotenv()
 init_db()
 
@@ -39,7 +61,8 @@ PORT            = int(os.getenv("VIEWER_PORT", "8001"))
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 VISION_MODEL    = os.getenv("SUMMARIZE_MODEL") or os.getenv("CHAT_MODEL", "")
 # Documents collection is the fixed ingest target (Processar button always writes here).
-DOCS_COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
+DOCS_COLLECTION  = os.getenv("CHROMA_COLLECTION", "documents")
+CHATS_COLLECTION = os.getenv("CHATS_COLLECTION", "chats")
 # Active collection for viewing — starts as documents, can be switched via /api/switch-collection.
 _viewer_state: dict = {"collection": DOCS_COLLECTION}
 
@@ -685,6 +708,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(do_ingest(self.rfile, content_type, length))
 
             # ── User-or-admin endpoints ────────────────────────────────────
+            elif p == "/api/learn":
+                user = self._require_role("user", api=True)
+                if not user: return
+                body            = json.loads(self.rfile.read(length))
+                conversation_id = body.get("conversation_id", "").strip()
+                if not conversation_id:
+                    self.send_json({"ok": False, "error": "Missing conversation_id"})
+                    return
+                user_name = f"{user['name']} {user['surname']}"
+                self.send_json(do_learn(conversation_id, user["id"], user_name))
+
             elif p == "/api/chat":
                 user = self._require_role("user", api=True)
                 if not user: return

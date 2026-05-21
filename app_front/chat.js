@@ -1,8 +1,13 @@
-const thread  = document.getElementById("thread");
-const input   = document.getElementById("msg-input");
-const sendBtn = document.getElementById("send-btn");
-const stopBtn = document.getElementById("stop-btn");
-const welcome = document.getElementById("welcome");
+const thread    = document.getElementById("thread");
+const input     = document.getElementById("msg-input");
+const sendBtn   = document.getElementById("send-btn");
+const stopBtn   = document.getElementById("stop-btn");
+const learnBtn  = document.getElementById("learn-btn");
+const welcome   = document.getElementById("welcome");
+
+function _setLearnVisible(show) {
+  learnBtn.style.display = show ? "" : "none";
+}
 
 marked.use({ breaks: true, gfm: true });
 
@@ -46,6 +51,7 @@ function newConversation() {
   autoResize(input);
   attachedImages = [];
   renderImagePreviews();
+  _setLearnVisible(false);
   document.querySelectorAll(".history-item").forEach(el => el.classList.remove("active"));
   input.focus();
 }
@@ -258,6 +264,7 @@ async function sendMessage() {
   busy = true;
   sendBtn.style.display = "none";
   stopBtn.style.display = "";
+  learnBtn.disabled = true;
   input.disabled = true;
   abortController = new AbortController();
 
@@ -377,6 +384,7 @@ async function sendMessage() {
           if (chunk.done) {
             finalizeStreamingBubble(chunk.sources);
             if (chunk.conversation_id) currentConversationId = chunk.conversation_id;
+            if (currentConversationId) _setLearnVisible(true);
             history.push({ role: "assistant", content: fullAnswer });
             loadHistory();
           }
@@ -408,10 +416,62 @@ async function sendMessage() {
 
   busy = false;
   abortController = null;
+  learnBtn.disabled = false;
   sendBtn.style.display = "";
   stopBtn.style.display = "none";
   input.disabled = false;
   input.focus();
+}
+
+// ── Learn from chat ────────────────────────────────────────────────────────
+
+async function learnFromChat() {
+  if (!currentConversationId) return;
+  learnBtn.disabled = true;
+
+  Swal.fire({
+    text: 'Gerando resumo e aprendendo com a conversa…',
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading(),
+    customClass: { popup: 'custom-swal' },
+    heightAuto: false,
+  });
+
+  try {
+    const r = await fetch('/api/learn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: currentConversationId }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      Swal.fire({
+        text: 'Aprendi com essa conversa!',
+        icon: 'success',
+        confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
+        customClass: { popup: 'custom-swal' },
+      });
+    } else {
+      Swal.fire({
+        text: data.error || 'Erro ao aprender.',
+        icon: 'error',
+        confirmButtonColor: '#1e3a5f',
+        heightAuto: false,
+        customClass: { popup: 'custom-swal' },
+      });
+    }
+  } catch (e) {
+    Swal.fire({
+      text: e.message,
+      icon: 'error',
+      confirmButtonColor: '#1e3a5f',
+      heightAuto: false,
+      customClass: { popup: 'custom-swal' },
+    });
+  } finally {
+    learnBtn.disabled = false;
+  }
 }
 
 // ── History sidebar ────────────────────────────────────────────────────────
@@ -497,6 +557,7 @@ async function loadConversation(id) {
     thread.appendChild(welcome);
     welcome.style.display = "none";
     currentConversationId = id;
+    _setLearnVisible(true);
 
     for (const msg of conv.messages) {
       if (msg.role === "user") {

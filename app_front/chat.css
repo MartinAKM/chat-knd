@@ -558,7 +558,8 @@ details[open] > .sources-toggle::before {
     color: #94a3b8;
 }
 
-#attach-btn {
+#attach-btn,
+#learn-btn {
     flex-shrink: 0;
     background: none;
     border: none;
@@ -573,9 +574,15 @@ details[open] > .sources-toggle::before {
     transition: color .15s, background .15s;
     font-family: inherit;
 }
-#attach-btn:hover {
+#attach-btn:hover,
+#learn-btn:hover {
     color: #1e3a5f;
     background: #f1f5f9;
+}
+#learn-btn:disabled {
+    opacity: .35;
+    cursor: default;
+    pointer-events: none;
 }
 
 /* Image preview strip above the composer */
