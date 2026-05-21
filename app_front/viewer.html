@@ -56,11 +56,12 @@
     </div>
     <div class="aside-head">Arquivos</div>
     <div class="source-filter">
-      <input type="text" id="source-filter-input" placeholder="Filtrar Arquivos…" oninput="filterSources()" />
+      <input type="text" id="source-filter-input" placeholder="Filtrar Arquivos…" oninput="onSourceFilterInput()" />
     </div>
     <div class="source-list" id="source-list">
       <div class="empty">Carregando…</div>
     </div>
+    <div class="source-pagination" id="source-pagination" style="display:none"></div>
   </aside>
 
   <main>

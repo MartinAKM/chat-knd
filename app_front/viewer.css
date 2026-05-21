@@ -144,9 +144,24 @@ aside {
     border-color: #1e3a5f; 
 }
 
-.source-list { 
-    overflow-y: auto; 
-    flex: 1; 
+.source-list {
+    overflow-y: auto;
+    flex: 1;
+}
+.source-pagination {
+    flex-shrink: 0;
+    padding: 6px 8px;
+    background: #fff;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+}
+.source-pag-info {
+    font-size: .72rem;
+    color: #64748b;
+    white-space: nowrap;
 }
 .source-item {
     padding: 9px 16px; 

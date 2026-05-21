@@ -43,6 +43,25 @@ DOCS_COLLECTION = os.getenv("CHROMA_COLLECTION", "documents")
 # Active collection for viewing — starts as documents, can be switched via /api/switch-collection.
 _viewer_state: dict = {"collection": DOCS_COLLECTION}
 
+# Cache: col_name -> {source: chunk_count}. Invalidated on ingest / delete / clear / reset.
+_source_cache: dict = {}
+
+
+def _invalidate_source_cache(col_name: str | None = None):
+    if col_name:
+        _source_cache.pop(col_name, None)
+    else:
+        _source_cache.clear()
+
+
+def _get_source_counts(col, col_name: str, total: int) -> dict:
+    cached = _source_cache.get(col_name)
+    if cached is not None:
+        return cached
+    counts = _collect_source_counts(col, total)
+    _source_cache[col_name] = counts
+    return counts
+
 
 def _active() -> str:
     return _viewer_state["collection"]
@@ -93,14 +112,37 @@ def get_stats():
     for col_info in collections:
         col = client.get_collection(col_info.name)
         count = col.count()
-        source_counts = _collect_source_counts(col, count) if count > 0 else {}
+        source_counts = _get_source_counts(col, col_info.name, count) if count > 0 else {}
         result.append({
             "name": col_info.name,
             "count": count,
-            "sources": sorted(source_counts.keys()),
-            "source_counts": source_counts,
+            "sources_count": len(source_counts),
         })
     return {"collections": result, "active": _active()}
+
+
+def get_sources(page: int = 1, page_size: int = 50, q: str = "") -> dict:
+    client = get_client()
+    col_name = _active()
+    try:
+        col = client.get_collection(col_name)
+    except Exception:
+        return {"sources": [], "total": 0}
+    total_chunks = col.count()
+    if total_chunks == 0:
+        return {"sources": [], "total": 0}
+    source_counts = _get_source_counts(col, col_name, total_chunks)
+    sources = sorted(source_counts.keys())
+    if q:
+        q_lower = q.lower()
+        sources = [s for s in sources if q_lower in s.lower()]
+    total = len(sources)
+    offset = (page - 1) * page_size
+    page_sources = sources[offset:offset + page_size]
+    return {
+        "sources": [{"name": s, "count": source_counts[s]} for s in page_sources],
+        "total": total,
+    }
 
 
 def get_documents(page=1, page_size=30, source=None):
@@ -246,6 +288,7 @@ def handle_delete(body_bytes: bytes):
     if not count:
         return {"ok": False, "error": f"No chunks found for '{source}'"}
     col.delete(where={"source": source})
+    _invalidate_source_cache(col_name)
     return {"ok": True, "source": source, "deleted": count}
 
 
@@ -290,6 +333,7 @@ def _parse_upload(rfile, content_type: str, content_length: int):
 def handle_reset_collection(col_name: str | None = None):
     col_name = col_name or _active()
     invalidate_collection_cache(CHROMA_PATH, EMBED_MODEL, col_name)
+    _invalidate_source_cache(col_name)
     client = get_client()
     try:
         client.delete_collection(col_name)
@@ -301,9 +345,10 @@ def handle_reset_collection(col_name: str | None = None):
 
 def handle_clear_all_chunks():
     """Delete every chunk from the active collection without dropping it."""
+    col_name = _active()
     client = get_client()
     try:
-        col = client.get_collection(_active())
+        col = client.get_collection(col_name)
     except Exception:
         return {"ok": True, "deleted": 0}
     total = col.count()
@@ -319,6 +364,7 @@ def handle_clear_all_chunks():
         col.delete(ids=ids)
         deleted += len(ids)
         offset += len(ids)
+    _invalidate_source_cache(col_name)
     return {"ok": True, "deleted": deleted}
 
 
@@ -342,6 +388,7 @@ def do_ingest(rfile, content_type: str, content_length: int):
             return {"ok": False, "error": "No usable content found after cleaning."}
         col = get_collection(CHROMA_PATH, EMBED_MODEL, DOCS_COLLECTION)
         upsert_chunks(col, filename, chunks)
+        _invalidate_source_cache(DOCS_COLLECTION)
         return {"ok": True, "filename": filename, "chunks": len(chunks)}
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -458,6 +505,13 @@ class Handler(BaseHTTPRequestHandler):
                 page_size = int(params.get("page_size", [30])[0])
                 source    = params.get("source", [None])[0]
                 self.send_json(get_documents(page, page_size, source))
+
+            elif path == "/api/sources":
+                if not self._require_role("admin", api=True): return
+                page      = int(params.get("page", [1])[0])
+                page_size = int(params.get("page_size", [50])[0])
+                q         = params.get("q", [""])[0]
+                self.send_json(get_sources(page, page_size, q))
 
             elif path == "/api/search":
                 if not self._require_role("admin", api=True): return

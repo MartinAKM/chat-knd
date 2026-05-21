@@ -1,6 +1,9 @@
 const PAGE_SIZE = 30;
+const SOURCE_PAGE_SIZE = 50;
 
 let state = { mode: 'all', source: null, query: '', page: 1, total: 0 };
+let _srcState = { page: 1, total: 0, query: '' };
+let _srcFilterTimer = null;
 
 async function api(path) {
   const r = await fetch(path);
@@ -15,32 +18,62 @@ async function loadStats() {
   state.collection = data.active;
   if (col) {
     document.getElementById('s-chunks').textContent = col.count;
-    document.getElementById('s-sources').textContent = col.sources.length;
-    renderSources(col.sources, col.source_counts);
+    document.getElementById('s-sources').textContent = col.sources_count;
   }
+  await loadSources(1, '');
 }
 
-function renderSources(sources, counts) {
+async function loadSources(page, q) {
+  _srcState.page = page;
+  _srcState.query = q;
+  const el = document.getElementById('source-list');
+  el.innerHTML = '<div class="empty">Carregando…</div>';
+  document.getElementById('source-pagination').style.display = 'none';
+  let url = `/api/sources?page=${page}&page_size=${SOURCE_PAGE_SIZE}`;
+  if (q) url += `&q=${encodeURIComponent(q)}`;
+  const data = await api(url);
+  _srcState.total = data.total || 0;
+  renderSources(data.sources || []);
+  renderSourcePagination();
+}
+
+function renderSources(sources) {
   const el = document.getElementById('source-list');
   if (!sources.length) { el.innerHTML = '<div class="empty">Sem dados.</div>'; return; }
   el.innerHTML = sources.map(s => {
-    const safe = s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const safe = s.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const isActive = state.source === s.name;
     return `
-    <div class="source-item" data-src="${escHtml(s)}" onclick="selectSource('${safe}')">
-      <div class="source-name">${escHtml(s)}</div>
-      <div class="source-count">${(counts[s]||0)} chunk(s)</div>
+    <div class="source-item${isActive ? ' active' : ''}" data-src="${escHtml(s.name)}" onclick="selectSource('${safe}')">
+      <div class="source-name">${escHtml(s.name)}</div>
+      <div class="source-count">${s.count} chunk(s)</div>
       <button class="del-btn" title="Deletar arquivo."
         onclick="deleteSource(event,'${safe}')">&#x2715;</button>
     </div>`;
   }).join('');
-  filterSources();
 }
 
-function filterSources() {
-  const q = (document.getElementById('source-filter-input').value || '').toLowerCase();
-  document.querySelectorAll('.source-item').forEach(el => {
-    el.style.display = el.dataset.src.toLowerCase().includes(q) ? '' : 'none';
-  });
+function renderSourcePagination() {
+  const pag = document.getElementById('source-pagination');
+  const pages = Math.ceil(_srcState.total / SOURCE_PAGE_SIZE);
+  if (pages <= 1) { pag.style.display = 'none'; return; }
+  pag.style.display = 'flex';
+  const p = _srcState.page;
+  pag.innerHTML =
+    `<button class="page-btn" ${p === 1 ? 'disabled' : ''} onclick="goSourcePage(${p - 1})">&#8592;</button>` +
+    `<span class="source-pag-info">${p} / ${pages}</span>` +
+    `<button class="page-btn" ${p === pages ? 'disabled' : ''} onclick="goSourcePage(${p + 1})">&#8594;</button>`;
+}
+
+async function goSourcePage(p) {
+  await loadSources(p, _srcState.query);
+}
+
+function onSourceFilterInput() {
+  clearTimeout(_srcFilterTimer);
+  _srcFilterTimer = setTimeout(() => {
+    loadSources(1, document.getElementById('source-filter-input').value.trim());
+  }, 300);
 }
 
 async function deleteSource(e, src) {
@@ -563,7 +596,7 @@ function renderCollections(collections, active) {
           </div>
           <div class="collection-stat">
             <span class="label">Arquivos</span>
-            <span class="value">${col.sources.length}</span>
+            <span class="value">${col.sources_count}</span>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center">
