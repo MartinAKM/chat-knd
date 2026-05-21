@@ -606,6 +606,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "Email ou senha incorretos."})
                     return
                 token    = create_session(user["id"])
+                print(f"[login] {user['name']} {user['surname']} ({email})")
                 cookie   = f"session={token}; Path=/; HttpOnly; Max-Age={SESSION_DAYS * 86400}; SameSite=Lax"
                 redirect = "/" if user["role"] == "admin" else "/chat"
                 self.send_json({"ok": True, "redirect": redirect}, extra_headers={"Set-Cookie": cookie})
