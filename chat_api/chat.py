@@ -24,6 +24,9 @@ from chat_api.history import (                   # noqa: E402
 
 OLLAMA_BASE_URL    = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 CHAT_MODEL         = os.getenv("CHAT_MODEL", "gemma4:31b-cloud")
+# Lighter/dedicated vision model for image keyword extraction pre-pass.
+# Falls back to CHAT_MODEL if not set.
+VISION_EXTRACT_MODEL = os.getenv("SUMMARIZE_MODEL") or CHAT_MODEL
 CHROMA_PATH        = os.getenv("CHROMA_PATH", "chroma_data")
 EMBED_MODEL        = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 DOCS_COLLECTION    = os.getenv("CHROMA_COLLECTION", "documents")
@@ -457,12 +460,15 @@ def _extract_image_terms(images: list[str]) -> str:
     problem description out of the attached images.
     The result is appended to the RAG query so retrieval can find relevant
     tickets even when the user sends an image with no (or minimal) text.
+
+    Uses streaming so the per-token timeout (180 s) resets on each chunk,
+    avoiding cold-model-load timeouts that plagued the old stream=False call.
     Returns an empty string on any failure.
     """
     payload = json.dumps({
-        "model": CHAT_MODEL,
+        "model": VISION_EXTRACT_MODEL,
         "messages": [{"role": "user", "content": _IMAGE_EXTRACT_PROMPT, "images": images}],
-        "stream": False,
+        "stream": True,
     }).encode()
     req = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/chat",
@@ -471,9 +477,21 @@ def _extract_image_terms(images: list[str]) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())["message"]["content"].strip()
-    except Exception:
+        tokens: list[str] = []
+        with urllib.request.urlopen(req, timeout=180) as r:
+            for raw_line in r:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                token = chunk.get("message", {}).get("content", "")
+                if token:
+                    tokens.append(token)
+                if chunk.get("done"):
+                    break
+        return "".join(tokens).strip()
+    except Exception as e:
+        print(f"[chat] image term extraction failed: {e}", file=sys.stderr)
         return ""
 
 
