@@ -37,7 +37,6 @@ _TICKET_RESULTS        = 5   # max chunks from tickets collection (dense + BM25)
 _KEYWORD_RESULTS       = 5   # max extra ticket chunks from keyword exact-match
 _DATE_RESULTS          = 10  # max extra ticket chunks from date-filtered search
 _MIN_PROXIMITY         = 60.0  # minimum score to include a chunk in LLM context
-_MIN_DISPLAY_PROXIMITY = 65.0  # minimum score to surface a source in the UI
 _MAX_HISTORY_TURNS     = 10  # prior messages kept in LLM context (5 exchanges)
 
 # Matches typical ERP program codes: 2-6 letters + 1-6 digits (e.g. CFAB24, cext24, EPRO15)
@@ -315,7 +314,7 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
             doc_fused  = bm25_store.rrf_fuse(doc_dense, doc_sparse)
 
             for cid, doc, meta, _ in doc_fused[:_DOC_RESULTS]:
-                seen[cid] = (doc, meta, id_to_prox.get(cid, _MIN_DISPLAY_PROXIMITY))
+                seen[cid] = (doc, meta, id_to_prox.get(cid, _MIN_PROXIMITY))
 
         # ── 2. Tickets: dense + BM25 + RRF ────────────────────────────────
         if tickets_count > 0:
@@ -386,11 +385,10 @@ def _retrieve_context(question: str) -> tuple[str, list[str]]:
 
         context = "\n---\n".join(entry[0] for entry in top)
         sources: list[str] = []
-        for _, meta, prox in top:
-            if prox >= _MIN_DISPLAY_PROXIMITY:
-                src = meta.get("source", "unknown")
-                if src not in sources:
-                    sources.append(src)
+        for _, meta, _ in top:
+            src = meta.get("source", "unknown")
+            if src not in sources:
+                sources.append(src)
 
         return context, sources
 
